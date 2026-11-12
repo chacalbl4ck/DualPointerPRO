@@ -5,9 +5,15 @@ DualPointer Pro
 
 import json
 import os
+import sys
 from typing import Dict, Any
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+if getattr(sys, 'frozen', False):
+    APP_DIR = os.path.dirname(sys.executable)
+else:
+    APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+CONFIG_FILE = os.path.join(APP_DIR, "config.json")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app": {
@@ -23,13 +29,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "monitors": [1],
         "sensitivity": 1.0,
         "cursor": {
-            "shape": "arrow",        # arrow, cyber, crosshair, dot, stylus
-            "color": "#00D2FF",       # Ciano Elétrico
+            "shape": "sleek",        # sleek, fluent, cyber, precision, capsule, stylus
+            "color": "#38BDF8",       # Ciano Ártico Moderno
             "border_color": "#FFFFFF",
             "size": 28,
             "glow": True,
             "show_label": True,
-            "label_text": "M1"
+            "label_text": "1"
         }
     },
     "mouse2": {
@@ -39,13 +45,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "monitors": [2],
         "sensitivity": 1.0,
         "cursor": {
-            "shape": "cyber",        # arrow, cyber, crosshair, dot, stylus
-            "color": "#FF8200",       # Laranja Neon
+            "shape": "sleek",        # sleek, fluent, cyber, precision, capsule, stylus
+            "color": "#FB923C",       # Sunset Coral Moderno
             "border_color": "#FFFFFF",
             "size": 28,
             "glow": True,
             "show_label": True,
-            "label_text": "M2"
+            "label_text": "2"
         }
     },
     "system": {

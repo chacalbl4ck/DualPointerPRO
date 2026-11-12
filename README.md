@@ -15,21 +15,30 @@ Com suporte nativo a múltiplos monitores, personalização visual de ponteiros 
 
 ## ✨ Principais Funcionalidades
 
-- **Controle Simultâneo e Independente:**
+- **Controle Simultâneo e Independente Total:**
   - Suprime a interferência mútua entre mouses usando **Windows Raw Input API (`WM_INPUT`)** e um **Low-Level Hook (`WH_MOUSE_LL`)**.
-  - Movimentos e cliques de um mouse não deslocam nem travam o outro mouse.
+  - Movimentos, cliques, **segurar e arrastar (Drag & Drop)** e rolagem da roda (scroll) de um mouse no Monitor X **não interferem nem interrompem** o mouse no Monitor Y.
+  - As janelas clicadas pelo Mouse 1 no Monitor X são ativadas em primeiro plano (`SetForegroundWindow`), e as janelas clicadas pelo Mouse 2 no Monitor Y são ativadas independentemente sem roubo indevido de foco.
+- **Ocultação do Ponteiro Padrão do Windows:**
+  - Substitui temporariamente os cursores padrão brutos do Windows via `SetSystemCursor`, impedindo que a seta branca nativa do sistema fique por cima dos cursores do aplicativo. Restaura automaticamente os cursores ao pausar ou fechar o app (`SPI_SETCURSORS`).
 - **Identificação Precisa por USB Hardware ID:**
   - Enumera e distingue os mouses pelo seu identificador USB único (`VID_xxxx&PID_yyyy` e Instance ID).
   - Identifica automaticamente fabricantes conhecidos (Logitech, Razer, Corsair, Microsoft, SteelSeries, etc.).
 - **Delimitação de Monitores por Mouse:**
   - Defina em qual monitor cada mouse pode atuar (Ex: *Mouse 1 restrito ao Monitor 1*, *Mouse 2 restrito ao Monitor 2*, ou livre em *Todos os Monitores*).
   - Coordenadas são automaticamente limitadas (clamped) ao retângulo do monitor selecionado.
-- **Design de Ponteiros Personalizáveis:**
-  - Diga adeus à confusão visual: diferencie os cursores com facilidade!
-  - **5 Formatos de Cursor:** Seta Moderna, Seta Gamer Cyber, Mira de Precisão (Crosshair), Ponto Neon e Stylus / Caneta.
-  - **Paleta de Cores & Cores Customizadas:** Ciano Elétrico, Laranja Neon, Verde Limão, Rosa Choque, Dourado, Branco ou qualquer cor RGB.
-  - **Efeito Glow / Aura Luminosa:** Círculo translúcido em volta do cursor para rápida localização em telas grandes ou 4K.
-  - **Etiquetas de Identificação:** Exibe uma tag estilizada ("M1", "M2" ou customizada) junto ao ponteiro.
+- **Design de Ponteiros Moderno, Limpo e Elegante:**
+  - Visual minimalista com proporção áurea, sombra suave (drop shadow), bordas nítidas e pill badges estilizados.
+  - **6 Formatos Modernos:** 
+    1. *Seta Minimalista Sleek* (design moderno estilo macOS Sonoma / Windows 11 Fluent)
+    2. *Seta Aerodinâmica Fluent* (entalhes aerodinâmicos suaves)
+    3. *Seta Gamer Cyber* (linhas angulares futuristas)
+    4. *Mira de Precisão Crosshair Pro* (retículo de alta acurácia com folga central)
+    5. *Ponto Halo Neon Capsule* (marcador de foco circular minimalista)
+    6. *Caneta Stylus Designer* (ponta de desenho e edição técnica)
+  - **Paleta de Cores & Cores Customizadas:** Ciano Ártico (`#38BDF8`), Sunset Coral (`#FB923C`), Verde Esmeralda (`#10B981`), Rosa Neon (`#F43F5E`), Roxo Cyber (`#A855F7`), Dourado Âmbar (`#FBBF24`), Cinza Titânio (`#64748B`) e seletor de cores RGB livre.
+  - **Efeito Glow / Aura Luminosa:** Círculo translúcido suave em volta do cursor para rápida localização em telas grandes ou 4K.
+  - **Pill Badges de Identificação:** Exibe uma etiqueta limpa ("1", "2" ou "M1", "M2") com fundo slate escuro e borda coordenada.
   - **Slider de Tamanho:** Ajuste fino de 18px até 54px.
   - **Canvas com Pré-visualização Interativa:** Teste visual instantâneo do design na própria interface antes de aplicar.
 - **Inicialização Automática com o Windows:**
@@ -67,17 +76,21 @@ O sistema foi concebido sem necessidade de drivers de kernel invasivos ou depend
 
 ## 🚀 Como Executar
 
-### Pré-requisitos
-- **Windows 10 ou Windows 11 (64-bit)**
-- **Python 3.10 ou superior** (Testado e validado no Python 3.12)
-- O software utiliza bibliotecas padrão do Python (`ctypes`, `winreg`, `tkinter`, `json`, `threading`), **sem precisar instalar bibliotecas externas via pip!**
+### Opção 1: Executável Autônomo (.exe) — Recomendado
+Basta dar um duplo clique diretamente no arquivo executável:
+```
+DualPointerPro.exe
+```
+*(Não requer ter Python instalado na máquina para rodar!)*
 
-### Execução Direta
+---
+
+### Opção 2: Pelo Atalho Batch ou Código Fonte Python
 1. Dê um duplo clique no arquivo:
    ```
    Iniciar_DualPointer.bat
    ```
-   *Ou pelo terminal:*
+   *Ou execute pelo terminal:*
    ```powershell
    python main.py
    ```

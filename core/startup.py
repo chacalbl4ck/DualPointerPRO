@@ -107,20 +107,26 @@ def set_startup_enabled(enabled: bool) -> bool:
             ole32.CoUninitialize()
             return False
             
-        # Determina o executável do python (preferência por pythonw.exe para não abrir janela preta de console)
-        py_exe = sys.executable
-        pyw_exe = os.path.join(os.path.dirname(py_exe), "pythonw.exe")
-        target_exe = pyw_exe if os.path.exists(pyw_exe) else py_exe
-        
-        # Caminho do main.py
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        main_script = os.path.join(root_dir, "main.py")
-        icon_path = os.path.join(root_dir, "assets", "icon.ico")
+        if getattr(sys, 'frozen', False):
+            target_exe = sys.executable
+            arguments = ""
+            work_dir = os.path.dirname(sys.executable)
+            icon_path = sys.executable
+        else:
+            py_exe = sys.executable
+            pyw_exe = os.path.join(os.path.dirname(py_exe), "pythonw.exe")
+            target_exe = pyw_exe if os.path.exists(pyw_exe) else py_exe
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            main_script = os.path.join(root_dir, "main.py")
+            arguments = f'"{main_script}"'
+            work_dir = root_dir
+            icon_path = os.path.join(root_dir, "assets", "icon.ico")
         
         vtbl = pLink.contents.lpVtbl.contents
         vtbl.SetPath(pLink, target_exe)
-        vtbl.SetArguments(pLink, f'"{main_script}"')
-        vtbl.SetWorkingDirectory(pLink, root_dir)
+        if arguments:
+            vtbl.SetArguments(pLink, arguments)
+        vtbl.SetWorkingDirectory(pLink, work_dir)
         vtbl.SetDescription(pLink, "DualPointer Pro - Gerenciador Multi-Mouse & Multi-Monitor")
         
         if os.path.exists(icon_path):

@@ -40,7 +40,7 @@ RIM_TYPEMOUSE = 0
 
 WH_MOUSE_LL = 14
 LLMHF_INJECTED = 0x00000001
-EXTRA_INFO_MAGIC = 0x12345678  # Identificador para cliques injetados pelo DualPointer
+EXTRA_INFO_MAGIC = 0x12345678  # Marcador único para cliques injetados pelo DualPointer
 
 # IDs de Cursores Nativos do Windows para ocultação
 SYSTEM_CURSOR_IDS = [
@@ -199,6 +199,15 @@ user32.UnhookWindowsHookEx.restype = wintypes.BOOL
 user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
 user32.CallNextHookEx.restype = ctypes.c_longlong
 
+user32.WindowFromPoint.argtypes = [POINT]
+user32.WindowFromPoint.restype = wintypes.HWND
+
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
+
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+
 user32.CreateIcon.argtypes = [
     wintypes.HINSTANCE, ctypes.c_int, ctypes.c_int,
     ctypes.c_byte, ctypes.c_byte,
@@ -245,18 +254,39 @@ gdi32.Polygon.restype = wintypes.BOOL
 gdi32.Ellipse.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 gdi32.Ellipse.restype = wintypes.BOOL
 
+gdi32.RoundRect.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+gdi32.RoundRect.restype = wintypes.BOOL
+
+gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.COLORREF]
+gdi32.SetTextColor.restype = wintypes.COLORREF
+
+gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
+gdi32.SetBkMode.restype = ctypes.c_int
+
+gdi32.TextOutW.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.LPCWSTR, ctypes.c_int]
+gdi32.TextOutW.restype = wintypes.BOOL
+
 gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
 gdi32.DeleteObject.restype = wintypes.BOOL
 
 gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
 gdi32.SelectObject.restype = wintypes.HGDIOBJ
 
+gdi32.GetStockObject.argtypes = [ctypes.c_int]
+gdi32.GetStockObject.restype = wintypes.HGDIOBJ
+
+gdi32.MoveToEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+gdi32.MoveToEx.restype = wintypes.BOOL
+
+gdi32.LineTo.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+gdi32.LineTo.restype = wintypes.BOOL
+
 
 class DualPointerEngine:
     """
-    Motor avançado de múltiplos mouses simultâneos.
-    Mantém 2 ponteiros independentes mesmo no mesmo monitor,
-    garante que os cliques nunca se misturem e oculta o ponteiro padrão do Windows.
+    Motor avançado de múltiplos mouses simultâneos e independentes.
+    Mantém 2 ponteiros totalmente isolados entre monitores (movimentos, cliques,
+    arraste contínuo e rolagem não se misturam nem se interferem).
     """
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -265,8 +295,8 @@ class DualPointerEngine:
         self._thread: Optional[threading.Thread] = None
         
         # Coordenadas dos ponteiros (Mouse 1 e Mouse 2)
-        self.pos1 = [200.0, 200.0]
-        self.pos2 = [600.0, 300.0]
+        self.pos1 = [250.0, 250.0]
+        self.pos2 = [650.0, 350.0]
         
         # Limites dos monitores
         self.bounds1 = (0, 0, 1920, 1080)
@@ -277,12 +307,16 @@ class DualPointerEngine:
         self.device_map: Dict[int, str] = {} # handle -> 'm1' ou 'm2'
         self.active_handles: Dict[str, int] = {} # 'm1'/'m2' -> handle
         
-        # Estado dos botões (evita que um mouse interrompa o arraste do outro)
+        # Estado de botões pressionados (Garante isolamento de arraste)
         self.m1_down = False
         self.m1_rdown = False
         self.m2_down = False
         self.m2_rdown = False
         self.active_mouse = "m1"
+        
+        # Janelas ativas por monitor
+        self.active_wnd_m1: Optional[int] = None
+        self.active_wnd_m2: Optional[int] = None
         
         # Janelas e Hook Win32
         self.hwnd_overlay: Optional[int] = None
@@ -311,7 +345,6 @@ class DualPointerEngine:
         self.bounds1 = get_monitor_bounds_for_indices(m1_monitors)
         self.bounds2 = get_monitor_bounds_for_indices(m2_monitors)
         
-        # Garante que as posições iniciais estejam dentro dos limites
         self.pos1[0], self.pos1[1] = clamp_to_bounds(self.pos1[0], self.pos1[1], self.bounds1)
         self.pos2[0], self.pos2[1] = clamp_to_bounds(self.pos2[0], self.pos2[1], self.bounds2)
 
@@ -325,7 +358,6 @@ class DualPointerEngine:
             for cid in SYSTEM_CURSOR_IDS:
                 hBlank = user32.CreateIcon(None, 32, 32, 1, 1, and_mask, xor_mask)
                 if hBlank:
-                    # SetSystemCursor consome/destrói o handle automaticamente
                     user32.SetSystemCursor(hBlank, cid)
             self._cursors_hidden = True
         except Exception as e:
@@ -348,7 +380,6 @@ class DualPointerEngine:
         self._running = True
         self._paused = False
         
-        # Oculta o cursor nativo do Windows para não sobrepor o design do app
         if self.config.get("system", {}).get("hide_os_cursor", True):
             self.hide_system_cursor()
             
@@ -390,7 +421,6 @@ class DualPointerEngine:
         self._refresh_geometry()
         self.device_map.clear()
         
-        # Atualiza visibilidade do cursor do sistema
         should_hide = new_config.get("system", {}).get("hide_os_cursor", True)
         if not self._paused:
             if should_hide:
@@ -427,7 +457,6 @@ class DualPointerEngine:
         elif m1_hwid and matches_device(mock_dev, m1_hwid, m1_inst):
             target = "m1"
         else:
-            # Atribuição dinâmica se houver 2 mouses ativos
             if 'm1' not in self.active_handles:
                 self.active_handles['m1'] = hDevice
                 target = 'm1'
@@ -444,22 +473,32 @@ class DualPointerEngine:
 
     def _inject_click(self, x: int, y: int, btn_flags: int, raw_button_data: int):
         """
-        Posiciona o cursor e injeta o clique na coordenada exata do mouse correspondente.
-        Usa EXTRA_INFO_MAGIC para garantir que o hook permita o clique e o RawInput ignore o eco.
+        Posiciona o cursor e despacha o clique cirurgicamente nas coordenadas do mouse correto.
+        Garante que janelas clicadas pelo mouse fiquem em primeiro plano.
         """
-        # Posiciona o cursor na coordenada do mouse correto antes de disparar o clique
+        # Posiciona o cursor do sistema no alvo
         user32.SetCursorPos(x, y)
         
+        # Identifica a janela sob o ponto de clique e a ativa em primeiro plano
+        # (Somente se for clique de botão, rolagem não rouba foco)
+        if btn_flags & (0x0001 | 0x0004 | 0x0010): # DOWN buttons
+            pt = POINT(x, y)
+            target_wnd = user32.WindowFromPoint(pt)
+            if target_wnd and target_wnd != self.hwnd_overlay:
+                root_wnd = user32.GetAncestor(target_wnd, 2) # GA_ROOT
+                wnd_to_activate = root_wnd if root_wnd else target_wnd
+                user32.SetForegroundWindow(wnd_to_activate)
+        
         events = []
-        if btn_flags & 0x0001: events.append((0x0002, 0)) # MOUSEEVENTF_LEFTDOWN
-        if btn_flags & 0x0002: events.append((0x0004, 0)) # MOUSEEVENTF_LEFTUP
-        if btn_flags & 0x0004: events.append((0x0008, 0)) # MOUSEEVENTF_RIGHTDOWN
-        if btn_flags & 0x0008: events.append((0x0010, 0)) # MOUSEEVENTF_RIGHTUP
-        if btn_flags & 0x0010: events.append((0x0020, 0)) # MOUSEEVENTF_MIDDLEDOWN
-        if btn_flags & 0x0020: events.append((0x0040, 0)) # MOUSEEVENTF_MIDDLEUP
-        if btn_flags & 0x0400: # RI_MOUSE_WHEEL
+        if btn_flags & 0x0001: events.append((0x0002, 0)) # LEFTDOWN
+        if btn_flags & 0x0002: events.append((0x0004, 0)) # LEFTUP
+        if btn_flags & 0x0004: events.append((0x0008, 0)) # RIGHTDOWN
+        if btn_flags & 0x0008: events.append((0x0010, 0)) # RIGHTUP
+        if btn_flags & 0x0010: events.append((0x0020, 0)) # MIDDLEDOWN
+        if btn_flags & 0x0020: events.append((0x0040, 0)) # MIDDLEUP
+        if btn_flags & 0x0400: # MOUSEWHEEL
             wheel_delta = ctypes.c_short(raw_button_data).value
-            events.append((0x0800, wheel_delta)) # MOUSEEVENTF_WHEEL
+            events.append((0x0800, wheel_delta))
 
         for flag, data in events:
             inp = INPUT()
@@ -472,13 +511,18 @@ class DualPointerEngine:
             inp.u.mi.dwExtraInfo = EXTRA_INFO_MAGIC
             user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
-    def _draw_cursor_gdi(self, hdc: int, cx: int, cy: int, cursor_cfg: Dict[str, Any]):
-        """Desenha o cursor personalizado diretamente no Device Context (GDI) do overlay."""
-        shape = cursor_cfg.get("shape", "arrow")
-        color_hex = cursor_cfg.get("color", "#00D2FF")
+    def _draw_cursor_gdi(self, hdc: int, cx: int, cy: int, cursor_cfg: Dict[str, Any], default_label: str = "1"):
+        """
+        Desenho GDI moderno, elegante e de alta precisão com sombra suave (Drop Shadow),
+        borda nítida, corpo de cor vibrante e Pill Badge estilizado.
+        """
+        shape = cursor_cfg.get("shape", "sleek").lower()
+        color_hex = cursor_cfg.get("color", "#38BDF8")
         border_hex = cursor_cfg.get("border_color", "#FFFFFF")
         size = int(cursor_cfg.get("size", 28))
         glow = cursor_cfg.get("glow", True)
+        show_label = cursor_cfg.get("show_label", True)
+        label_text = cursor_cfg.get("label_text", default_label) or default_label
         
         r, g, b = hex_to_rgb(color_hex)
         br_color = (b << 16) | (g << 8) | r
@@ -486,40 +530,145 @@ class DualPointerEngine:
         rb, gb, bb = hex_to_rgb(border_hex)
         border_color = (bb << 16) | (gb << 8) | rb
         
-        # 1. Glow / Aura
+        null_brush = gdi32.GetStockObject(5) # NULL_BRUSH
+        shadow_brush = gdi32.CreateSolidBrush(0x000F0A05) # Sombra carvão profundo
+        shadow_pen = gdi32.CreatePen(0, 1, 0x000F0A05)
+
+        # 1. Aura Glow Elegante e Sutil
         if glow:
             pen_glow = gdi32.CreatePen(0, 1, br_color)
             old_pen = gdi32.SelectObject(hdc, pen_glow)
-            null_brush = gdi32.GetStockObject(5) # NULL_BRUSH
             old_brush = gdi32.SelectObject(hdc, null_brush)
             
-            gr = int(size * 0.75)
+            gr = int(size * 0.72)
             gdi32.Ellipse(hdc, cx - gr, cy - gr, cx + gr, cy + gr)
             
             gdi32.SelectObject(hdc, old_pen)
             gdi32.SelectObject(hdc, old_brush)
             gdi32.DeleteObject(pen_glow)
 
-        # 2. Desenha o polígono do cursor
-        poly = get_cursor_polygon(shape, size)
-        num_pts = len(poly)
-        pts = (POINT * num_pts)()
-        for i, (px, py) in enumerate(poly):
-            pts[i].x = int(cx + px)
-            pts[i].y = int(cy + py)
+        # 2. Desenho das Formas Modernas
+        if shape in ["sleek", "arrow", "fluent", "cyber", "stylus"]:
+            poly = get_cursor_polygon(shape, size)
+            num_pts = len(poly)
+            
+            # A) Sombra suave (Drop Shadow)
+            s_offset = 2
+            shadow_pts = (POINT * num_pts)()
+            for i, (px, py) in enumerate(poly):
+                shadow_pts[i].x = int(cx + px + s_offset)
+                shadow_pts[i].y = int(cy + py + s_offset)
+                
+            old_p = gdi32.SelectObject(hdc, shadow_pen)
+            old_b = gdi32.SelectObject(hdc, shadow_brush)
+            gdi32.Polygon(hdc, shadow_pts, num_pts)
+            
+            # B) Corpo principal com borda
+            pts = (POINT * num_pts)()
+            for i, (px, py) in enumerate(poly):
+                pts[i].x = int(cx + px)
+                pts[i].y = int(cy + py)
 
-        pen = gdi32.CreatePen(0, 2, border_color)
-        brush = gdi32.CreateSolidBrush(br_color)
-        
-        old_pen = gdi32.SelectObject(hdc, pen)
-        old_brush = gdi32.SelectObject(hdc, brush)
-        
-        gdi32.Polygon(hdc, pts, num_pts)
-        
-        gdi32.SelectObject(hdc, old_pen)
-        gdi32.SelectObject(hdc, old_brush)
-        gdi32.DeleteObject(pen)
-        gdi32.DeleteObject(brush)
+            pen = gdi32.CreatePen(0, 2, border_color)
+            brush = gdi32.CreateSolidBrush(br_color)
+            
+            gdi32.SelectObject(hdc, pen)
+            gdi32.SelectObject(hdc, brush)
+            gdi32.Polygon(hdc, pts, num_pts)
+            
+            gdi32.SelectObject(hdc, old_p)
+            gdi32.SelectObject(hdc, old_b)
+            gdi32.DeleteObject(pen)
+            gdi32.DeleteObject(brush)
+
+        elif shape in ["precision", "crosshair"]:
+            # Mira Minimalista de Alta Precisão
+            r_c = int(size * 0.38)
+            gap = int(size * 0.12)
+            ext = int(size * 0.55)
+            
+            pen_body = gdi32.CreatePen(0, 2, br_color)
+            pen_border = gdi32.CreatePen(0, 1, border_color)
+            old_p = gdi32.SelectObject(hdc, pen_body)
+            old_b = gdi32.SelectObject(hdc, null_brush)
+            
+            gdi32.Ellipse(hdc, cx - r_c, cy - r_c, cx + r_c, cy + r_c)
+            
+            gdi32.MoveToEx(hdc, cx - ext, cy, None)
+            gdi32.LineTo(hdc, cx - gap, cy)
+            gdi32.MoveToEx(hdc, cx + gap, cy, None)
+            gdi32.LineTo(hdc, cx + ext, cy)
+            gdi32.MoveToEx(hdc, cx, cy - ext, None)
+            gdi32.LineTo(hdc, cx, cy - gap)
+            gdi32.MoveToEx(hdc, cx, cy + gap, None)
+            gdi32.LineTo(hdc, cx, cy + ext)
+            
+            # Ponto central
+            white_b = gdi32.CreateSolidBrush(0x00FFFFFF)
+            gdi32.SelectObject(hdc, white_b)
+            gdi32.Ellipse(hdc, cx - 2, cy - 2, cx + 2, cy + 2)
+            
+            gdi32.SelectObject(hdc, old_p)
+            gdi32.SelectObject(hdc, old_b)
+            gdi32.DeleteObject(pen_body)
+            gdi32.DeleteObject(pen_border)
+            gdi32.DeleteObject(white_b)
+
+        elif shape in ["capsule", "dot"]:
+            # Ponto Halo Minimalista
+            cr = int(size * 0.32)
+            pen_b = gdi32.CreatePen(0, 2, border_color)
+            brush_b = gdi32.CreateSolidBrush(br_color)
+            
+            old_p = gdi32.SelectObject(hdc, pen_b)
+            old_b = gdi32.SelectObject(hdc, brush_b)
+            gdi32.Ellipse(hdc, cx - cr, cy - cr, cx + cr, cy + cr)
+            
+            core_b = gdi32.CreateSolidBrush(0x00FFFFFF)
+            gdi32.SelectObject(hdc, core_b)
+            gdi32.Ellipse(hdc, cx - 2, cy - 2, cx + 2, cy + 2)
+            
+            gdi32.SelectObject(hdc, old_p)
+            gdi32.SelectObject(hdc, old_b)
+            gdi32.DeleteObject(pen_b)
+            gdi32.DeleteObject(brush_b)
+            gdi32.DeleteObject(core_b)
+
+        # 3. Pill Badge Estilizado (M1 / M2 ou 1 / 2)
+        if show_label and label_text:
+            bx = cx + int(size * 0.72)
+            by = cy + int(size * 0.62)
+            pw = max(9, len(label_text) * 4 + 3)
+            ph = 7
+            
+            # Sombra da pílula
+            gdi32.SelectObject(hdc, shadow_pen)
+            gdi32.SelectObject(hdc, shadow_brush)
+            gdi32.RoundRect(hdc, bx - pw + 1, by - ph + 1, bx + pw + 1, by + ph + 1, 6, 6)
+            
+            # Fundo da pílula (Dark Slate) e borda na cor do mouse
+            pill_brush = gdi32.CreateSolidBrush(0x001E170F)
+            pill_pen = gdi32.CreatePen(0, 1, br_color)
+            gdi32.SelectObject(hdc, pill_pen)
+            gdi32.SelectObject(hdc, pill_brush)
+            gdi32.RoundRect(hdc, bx - pw, by - ph, bx + pw, by + ph, 6, 6)
+            
+            # Texto da pílula em branco puro
+            gdi32.SetTextColor(hdc, 0x00FFFFFF)
+            gdi32.SetBkMode(hdc, 1) # TRANSPARENT
+            stock_font = gdi32.GetStockObject(17) # DEFAULT_GUI_FONT
+            old_font = gdi32.SelectObject(hdc, stock_font)
+            
+            # Centraliza o texto
+            t_offset_x = 3 if len(label_text) == 1 else 6
+            gdi32.TextOutW(hdc, bx - t_offset_x, by - 6, label_text, len(label_text))
+            
+            gdi32.SelectObject(hdc, old_font)
+            gdi32.DeleteObject(pill_brush)
+            gdi32.DeleteObject(pill_pen)
+
+        gdi32.DeleteObject(shadow_brush)
+        gdi32.DeleteObject(shadow_pen)
 
     def _run_loop(self):
         """Loop de mensagens Win32 em segundo plano para Raw Input, Hook e Overlay."""
@@ -552,8 +701,8 @@ class DualPointerEngine:
                     cx2 = int(self.pos2[0] - v_left)
                     cy2 = int(self.pos2[1] - v_top)
                     
-                    self._draw_cursor_gdi(mem_dc, cx1, cy1, self.config.get("mouse1", {}).get("cursor", {}))
-                    self._draw_cursor_gdi(mem_dc, cx2, cy2, self.config.get("mouse2", {}).get("cursor", {}))
+                    self._draw_cursor_gdi(mem_dc, cx1, cy1, self.config.get("mouse1", {}).get("cursor", {}), "1")
+                    self._draw_cursor_gdi(mem_dc, cx2, cy2, self.config.get("mouse2", {}).get("cursor", {}), "2")
                 
                 gdi32.BitBlt(hdc, 0, 0, v_width, v_height, mem_dc, 0, 0, 0x00CC0020) # SRCCOPY
                 
@@ -573,7 +722,7 @@ class DualPointerEngine:
                         if raw.header.dwType == RIM_TYPEMOUSE:
                             hDev = raw.header.hDevice
                             
-                            # DESCARTA imediatamente qualquer entrada gerada pelo SendInput
+                            # DESCARTA imediatamente qualquer entrada injetada pelo SendInput
                             # (hDev nulo ou dwExtraInfo igual ao nosso marcador mágico)
                             # Isso elimina 100% qualquer risco de disparo contínuo ou eco.
                             if not hDev or raw.mouse.ulExtraInformation == EXTRA_INFO_MAGIC:
@@ -589,7 +738,7 @@ class DualPointerEngine:
                                 self.on_device_activity(target)
                                 
                             if not self._paused:
-                                # Rastreamento de estado de botões físicos pressionados
+                                # Rastreamento de estado de botões pressionados (Hold & Drag)
                                 if btn_flags & 0x0001:  # LEFT_DOWN
                                     if target == 'm1': self.m1_down = True
                                     else: self.m2_down = True
@@ -603,7 +752,7 @@ class DualPointerEngine:
                                     if target == 'm1': self.m1_rdown = False
                                     else: self.m2_rdown = False
 
-                                # 1. MOUSE 1
+                                # 1. MOUSE 1 (MONITOR X)
                                 if target == 'm1':
                                     sens1 = float(self.config.get("mouse1", {}).get("sensitivity", 1.0))
                                     if dx or dy:
@@ -611,16 +760,18 @@ class DualPointerEngine:
                                         self.pos1[1] += dy * sens1
                                         self.pos1[0], self.pos1[1] = clamp_to_bounds(self.pos1[0], self.pos1[1], self.bounds1)
                                     
-                                    # Posiciona o cursor do sistema se Mouse 2 não estiver segurando arraste
+                                    # Se Mouse 2 não estiver segurando arraste no Monitor Y:
                                     if not self.m2_down and not self.m2_rdown:
                                         user32.SetCursorPos(int(self.pos1[0]), int(self.pos1[1]))
                                         self.active_mouse = 'm1'
                                         
-                                    # Injeta o clique cirurgicamente nas coordenadas de Mouse 1
+                                    # Injeta clique/rolagem cirurgicamente no Monitor X
+                                    # (Se Mouse 2 estiver arrastando, não interrompe o drag do 2)
                                     if btn_flags:
-                                        self._inject_click(int(self.pos1[0]), int(self.pos1[1]), btn_flags, btn_data)
+                                        if not self.m2_down and not self.m2_rdown:
+                                            self._inject_click(int(self.pos1[0]), int(self.pos1[1]), btn_flags, btn_data)
 
-                                # 2. MOUSE 2
+                                # 2. MOUSE 2 (MONITOR Y)
                                 else:
                                     sens2 = float(self.config.get("mouse2", {}).get("sensitivity", 1.0))
                                     if dx or dy:
@@ -628,16 +779,18 @@ class DualPointerEngine:
                                         self.pos2[1] += dy * sens2
                                         self.pos2[0], self.pos2[1] = clamp_to_bounds(self.pos2[0], self.pos2[1], self.bounds2)
                                     
-                                    # Posiciona o cursor do sistema se Mouse 1 não estiver segurando arraste
+                                    # Se Mouse 1 não estiver segurando arraste no Monitor X:
                                     if not self.m1_down and not self.m1_rdown:
                                         user32.SetCursorPos(int(self.pos2[0]), int(self.pos2[1]))
                                         self.active_mouse = 'm2'
                                         
-                                    # Injeta o clique cirurgicamente nas coordenadas de Mouse 2
+                                    # Injeta clique/rolagem cirurgicamente no Monitor Y
+                                    # (Se Mouse 1 estiver arrastando, não interrompe o drag do 1)
                                     if btn_flags:
-                                        self._inject_click(int(self.pos2[0]), int(self.pos2[1]), btn_flags, btn_data)
+                                        if not self.m1_down and not self.m1_rdown:
+                                            self._inject_click(int(self.pos2[0]), int(self.pos2[1]), btn_flags, btn_data)
                                 
-                                # Em modo de simulação, move o Mouse 2 automaticamente para testes com 1 mouse
+                                # Modo de simulação para testes com 1 mouse
                                 if self.simulation_mode and target == 'm1':
                                     self.pos2[0] += dx * 0.8 * self._sim_dir
                                     self.pos2[1] += dy * 0.8
@@ -676,7 +829,6 @@ class DualPointerEngine:
             None, None, hInst, None
         )
         
-        # Define a cor de transparência do Layered Window
         user32.SetLayeredWindowAttributes(self.hwnd_overlay, TRANSPARENT_COLOR, 0, LWA_COLORKEY)
         
         # Registra o recebimento de Raw Input para mouses

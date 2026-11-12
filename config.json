@@ -14,13 +14,13 @@
         ],
         "sensitivity": 1.0,
         "cursor": {
-            "shape": "arrow",
-            "color": "#00D2FF",
+            "shape": "sleek",
+            "color": "#38BDF8",
             "border_color": "#FFFFFF",
-            "size": 20,
+            "size": 21,
             "glow": false,
-            "show_label": false,
-            "label_text": "M1"
+            "show_label": true,
+            "label_text": "1"
         }
     },
     "mouse2": {
@@ -32,13 +32,13 @@
         ],
         "sensitivity": 1.0,
         "cursor": {
-            "shape": "cyber",
-            "color": "#FF8200",
+            "shape": "sleek",
+            "color": "#FB923C",
             "border_color": "#FFFFFF",
-            "size": 28,
+            "size": 20,
             "glow": false,
             "show_label": true,
-            "label_text": "M2"
+            "label_text": "2"
         }
     },
     "system": {

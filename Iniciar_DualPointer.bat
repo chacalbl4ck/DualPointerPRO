@@ -1,5 +1,9 @@
 @echo off
 title DualPointer Pro
 cd /d "%~dp0"
-start "" pythonw main.py
+if exist "DualPointerPro.exe" (
+    start "" "DualPointerPro.exe"
+) else (
+    start "" pythonw main.py
+)
 exit

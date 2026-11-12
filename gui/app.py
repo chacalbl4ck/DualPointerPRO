@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox
 import webbrowser
 import os
+import sys
 from typing import Dict, Any, List
 
 from core.config import load_config, save_config
@@ -29,14 +30,14 @@ ACCENT_ORANGE = "#F59E0B" # Laranja aviso
 BORDER_COLOR = "#334155"  # Bordas sutis
 
 PALETTE_PRESETS = [
-    ("#00D2FF", "Ciano"),
-    ("#FF8200", "Laranja"),
-    ("#10E575", "Verde"),
-    ("#FF2A6D", "Rosa"),
-    ("#9D4EDD", "Roxo"),
-    ("#FFD166", "Dourado"),
-    ("#FFFFFF", "Branco"),
-    ("#E63946", "Vermelho")
+    ("#38BDF8", "Ciano Ártico"),
+    ("#FB923C", "Sunset Coral"),
+    ("#10B981", "Verde Esmeralda"),
+    ("#F43F5E", "Rosa Neon"),
+    ("#A855F7", "Roxo Cyber"),
+    ("#FBBF24", "Âmbar / Dourado"),
+    ("#FFFFFF", "Branco Puro"),
+    ("#64748B", "Cinza Titânio")
 ]
 
 class DualPointerApp:
@@ -51,7 +52,10 @@ class DualPointerApp:
         self.root.configure(bg=BG_DARK)
         
         # Define ícone da janela
-        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        icon_path = os.path.join(base_dir, "assets", "icon.ico")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(os.path.dirname(sys.executable), "assets", "icon.ico")
         if os.path.exists(icon_path):
             try:
                 self.root.iconbitmap(icon_path)
@@ -287,18 +291,23 @@ class DualPointerApp:
         
         # Formato do ponteiro
         tk.Label(opts_card, text="Formato do Ponteiro:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(4, 2))
-        self.shape_var = tk.StringVar(value="arrow")
+        self.shape_var = tk.StringVar(value="sleek")
         shape_names = [
-            ("Seta Moderna (Padrão)", "arrow"),
-            ("Seta Gamer Cyber", "cyber"),
-            ("Mira de Precisão (Crosshair)", "crosshair"),
-            ("Ponto / Esfera Neon", "dot"),
-            ("Caneta / Stylus", "stylus")
+            ("Seta Minimalista Sleek (Moderna)", "sleek"),
+            ("Seta Aerodinâmica Fluent (Win 11)", "fluent"),
+            ("Seta Gamer Cyber (Angular)", "cyber"),
+            ("Mira de Precisão (Crosshair Pro)", "precision"),
+            ("Ponto Halo Neon (Capsule)", "capsule"),
+            ("Caneta Stylus Designer", "stylus")
         ]
         self.cb_shape = ttk.Combobox(opts_card, state="readonly", values=[s[0] for s in shape_names], font=("Segoe UI", 9))
         self.cb_shape.pack(fill=tk.X, pady=(0, 10))
         self.shape_name_map = {s[0]: s[1] for s in shape_names}
         self.shape_rev_map = {s[1]: s[0] for s in shape_names}
+        # Compatibilidade com formatos legados
+        self.shape_rev_map["arrow"] = "Seta Minimalista Sleek (Moderna)"
+        self.shape_rev_map["crosshair"] = "Mira de Precisão (Crosshair Pro)"
+        self.shape_rev_map["dot"] = "Ponto Halo Neon (Capsule)"
         self.cb_shape.bind("<<ComboboxSelected>>", self._on_cursor_prop_changed)
 
         # Cor do Ponteiro
@@ -649,11 +658,11 @@ class DualPointerApp:
 
     def _load_cursor_form(self, target: str):
         c_cfg = self.config.get(target, {}).get("cursor", {})
-        shape = c_cfg.get("shape", "arrow")
-        shape_disp = self.shape_rev_map.get(shape, "Seta Moderna (Padrão)")
+        shape = c_cfg.get("shape", "sleek")
+        shape_disp = self.shape_rev_map.get(shape, "Seta Minimalista Sleek (Moderna)")
         self.cb_shape.set(shape_disp)
         
-        color = c_cfg.get("color", "#00D2FF")
+        color = c_cfg.get("color", "#38BDF8")
         self.color_preview_btn.config(bg=color)
         
         size = int(c_cfg.get("size", 28))
@@ -674,7 +683,7 @@ class DualPointerApp:
 
     def _pick_custom_color(self):
         target = self.cursor_target_var.get()
-        cur_col = self.config[target]["cursor"].get("color", "#00D2FF")
+        cur_col = self.config[target]["cursor"].get("color", "#38BDF8")
         chosen = colorchooser.askcolor(initialcolor=cur_col, title="Escolha a Cor do Ponteiro")[1]
         if chosen:
             self._set_cursor_color(chosen)
@@ -690,7 +699,7 @@ class DualPointerApp:
     def _on_cursor_prop_changed(self, event=None):
         target = self.cursor_target_var.get()
         shape_name = self.cb_shape.get()
-        shape_code = self.shape_name_map.get(shape_name, "arrow")
+        shape_code = self.shape_name_map.get(shape_name, "sleek")
         
         self.config[target]["cursor"]["shape"] = shape_code
         self.config[target]["cursor"]["glow"] = self.chk_glow_var.get()

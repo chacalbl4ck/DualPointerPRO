@@ -1,0 +1,52 @@
+{
+    "app": {
+        "name": "DualPointer Pro",
+        "version": "1.0.0",
+        "author": "Caio Monteiro",
+        "github": "chacalbl4ck"
+    },
+    "mouse1": {
+        "hwid": "VID_046D&PID_C077",
+        "instance_id": "6&34e61bd2&0&0000",
+        "friendly_name": "HID-compliant mouse",
+        "monitors": [
+            1
+        ],
+        "sensitivity": 1.0,
+        "cursor": {
+            "shape": "arrow",
+            "color": "#00D2FF",
+            "border_color": "#FFFFFF",
+            "size": 20,
+            "glow": false,
+            "show_label": false,
+            "label_text": "M1"
+        }
+    },
+    "mouse2": {
+        "hwid": "VID_046D&PID_C077",
+        "instance_id": "6&34e61bd2&0&0000",
+        "friendly_name": "HID-compliant mouse",
+        "monitors": [
+            1
+        ],
+        "sensitivity": 1.0,
+        "cursor": {
+            "shape": "cyber",
+            "color": "#FF8200",
+            "border_color": "#FFFFFF",
+            "size": 28,
+            "glow": false,
+            "show_label": true,
+            "label_text": "M2"
+        }
+    },
+    "system": {
+        "autostart": false,
+        "active_on_launch": true,
+        "simulation_mode": false,
+        "failsafe_hotkey": "F12",
+        "hide_os_cursor": true,
+        "suppress_os_cursor": false
+    }
+}

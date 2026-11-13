@@ -1,0 +1,66 @@
+# =============================================================================
+# DualPointer Pro - .gitignore
+# =============================================================================
+
+# --- Bytecode & Cache do Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- PyInstaller & Empacotamento ---
+build/
+dist/
+*.manifest
+*.spec.bak
+
+# --- Ambientes Virtuais (Virtual Environments) ---
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- IDEs, Editores & Configurações de Workspace ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# --- Logs, Diagnósticos & Arquivos Temporários ---
+*.log
+*.tmp
+*.temp
+*.bak
+*.dmp
+crash_reports/
+
+# --- Arquivos de Sistema Operacional (Windows / macOS / Linux) ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# --- Ferramentas de Testes & Análise Estática ---
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Diversos ---
+generate_icon.py
+generate_modern_icon.py
+Iniciar_DualPointer.bat

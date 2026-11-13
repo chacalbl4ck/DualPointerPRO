@@ -23,6 +23,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "github": "chacalbl4ck"
     },
     "mouse1": {
+        "workspace_name": "Área de Trabalho 1 (Estação A)",
         "hwid": "VID_046D&PID_C077",
         "instance_id": "",
         "friendly_name": "Mouse Principal",
@@ -39,6 +40,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         }
     },
     "mouse2": {
+        "workspace_name": "Área de Trabalho 2 (Estação B)",
         "hwid": "",
         "instance_id": "",
         "friendly_name": "Mouse Secundário",
@@ -60,7 +62,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "simulation_mode": False,
         "failsafe_hotkey": "F12",
         "hide_os_cursor": True,
-        "suppress_os_cursor": True
+        "suppress_os_cursor": True,
+        "isolate_workspaces": True,
+        "multiseat_mode": True
     }
 }
 

@@ -208,6 +208,15 @@ user32.GetAncestor.restype = wintypes.HWND
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.SetForegroundWindow.restype = wintypes.BOOL
 
+user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetWindowTextW.restype = ctypes.c_int
+
+user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+user32.GetWindowTextLengthW.restype = ctypes.c_int
+
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.IsWindow.restype = wintypes.BOOL
+
 user32.CreateIcon.argtypes = [
     wintypes.HINSTANCE, ctypes.c_int, ctypes.c_int,
     ctypes.c_byte, ctypes.c_byte,
@@ -314,9 +323,14 @@ class DualPointerEngine:
         self.m2_rdown = False
         self.active_mouse = "m1"
         
-        # Janelas ativas por monitor
+        # Trava de sincronização para despacho atômico de cliques multi-seat
+        self._input_lock = threading.Lock()
+        
+        # Janelas ativas e títulos por Área de Trabalho (Estações Multi-Seat)
         self.active_wnd_m1: Optional[int] = None
         self.active_wnd_m2: Optional[int] = None
+        self.active_wnd_m1_title: str = "Aguardando interação..."
+        self.active_wnd_m2_title: str = "Aguardando interação..."
         
         # Janelas e Hook Win32
         self.hwnd_overlay: Optional[int] = None
@@ -332,6 +346,7 @@ class DualPointerEngine:
         # Callbacks para interface gráfica
         self.on_positions_updated: Optional[Callable[[float, float, float, float], None]] = None
         self.on_device_activity: Optional[Callable[[str], None]] = None
+        self.on_workspace_focus_changed: Optional[Callable[[str, int, str], None]] = None
         
         # Inicializa coordenadas e limites
         self._refresh_geometry()
@@ -431,8 +446,22 @@ class DualPointerEngine:
         if self.hwnd_overlay:
             user32.InvalidateRect(self.hwnd_overlay, None, True)
 
+    def _get_wnd_title(self, hwnd: int) -> str:
+        """Obtém o título legível de uma janela Win32."""
+        try:
+            if not hwnd or not user32.IsWindow(hwnd):
+                return "Área de Trabalho / Desktop"
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return "Janela do Sistema / Controle"
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            return buf.value
+        except Exception:
+            return "Aplicativo do Windows"
+
     def _resolve_device_target(self, hDevice: int) -> str:
-        """Determina se um handle de Raw Input pertence ao Mouse 1 ou Mouse 2."""
+        """Determina com precisão se um handle de Raw Input pertence à Área 1 (m1) ou Área 2 (m2)."""
         if hDevice in self.device_map:
             return self.device_map[hDevice]
 
@@ -451,12 +480,25 @@ class DualPointerEngine:
 
         mock_dev = {'hwid': dev_path, 'device_path': dev_path, 'instance_id': dev_path}
 
-        target = "m1"
+        target = None
+        # Verifica correspondência estrita com os dispositivos configurados
         if m2_hwid and matches_device(mock_dev, m2_hwid, m2_inst):
-            target = "m2"
+            if 'm2' not in self.active_handles or self.active_handles['m2'] == hDevice:
+                target = 'm2'
+                self.active_handles['m2'] = hDevice
+            elif 'm1' not in self.active_handles or self.active_handles['m1'] == hDevice:
+                target = 'm1'
+                self.active_handles['m1'] = hDevice
         elif m1_hwid and matches_device(mock_dev, m1_hwid, m1_inst):
-            target = "m1"
-        else:
+            if 'm1' not in self.active_handles or self.active_handles['m1'] == hDevice:
+                target = 'm1'
+                self.active_handles['m1'] = hDevice
+            elif 'm2' not in self.active_handles or self.active_handles['m2'] == hDevice:
+                target = 'm2'
+                self.active_handles['m2'] = hDevice
+
+        # Se não houver correspondência estrita ou mouses idênticos, separa por identificador físico único
+        if not target:
             if 'm1' not in self.active_handles:
                 self.active_handles['m1'] = hDevice
                 target = 'm1'
@@ -471,23 +513,35 @@ class DualPointerEngine:
         self.device_map[hDevice] = target
         return target
 
-    def _inject_click(self, x: int, y: int, btn_flags: int, raw_button_data: int):
+    def _inject_click(self, x: int, y: int, btn_flags: int, raw_button_data: int, source_seat: str = "m1"):
         """
-        Posiciona o cursor e despacha o clique cirurgicamente nas coordenadas do mouse correto.
-        Garante que janelas clicadas pelo mouse fiquem em primeiro plano.
+        Posiciona o cursor e despacha o clique cirurgicamente nas coordenadas da Área de Trabalho.
+        Garante que janelas clicadas pelo mouse fiquem em primeiro plano e atualiza o foco.
         """
-        # Posiciona o cursor do sistema no alvo
-        user32.SetCursorPos(x, y)
-        
-        # Identifica a janela sob o ponto de clique e a ativa em primeiro plano
-        # (Somente se for clique de botão, rolagem não rouba foco)
-        if btn_flags & (0x0001 | 0x0004 | 0x0010): # DOWN buttons
-            pt = POINT(x, y)
-            target_wnd = user32.WindowFromPoint(pt)
-            if target_wnd and target_wnd != self.hwnd_overlay:
-                root_wnd = user32.GetAncestor(target_wnd, 2) # GA_ROOT
-                wnd_to_activate = root_wnd if root_wnd else target_wnd
-                user32.SetForegroundWindow(wnd_to_activate)
+        with self._input_lock:
+            # Posiciona o cursor do sistema no alvo da Área de Trabalho
+            user32.SetCursorPos(x, y)
+            
+            # Identifica a janela sob o ponto de clique e a ativa em primeiro plano
+            if btn_flags & (0x0001 | 0x0004 | 0x0010): # DOWN buttons
+                pt = POINT(x, y)
+                target_wnd = user32.WindowFromPoint(pt)
+                if target_wnd and target_wnd != self.hwnd_overlay:
+                    root_wnd = user32.GetAncestor(target_wnd, 2) # GA_ROOT
+                    wnd_to_activate = root_wnd if root_wnd else target_wnd
+                    user32.SetForegroundWindow(wnd_to_activate)
+                    
+                    # Atualiza o rastreamento da janela ativa na Área de Trabalho correspondente
+                    title = self._get_wnd_title(wnd_to_activate)
+                    if source_seat == "m1":
+                        self.active_wnd_m1 = wnd_to_activate
+                        self.active_wnd_m1_title = title
+                    else:
+                        self.active_wnd_m2 = wnd_to_activate
+                        self.active_wnd_m2_title = title
+                        
+                    if self.on_workspace_focus_changed:
+                        self.on_workspace_focus_changed(source_seat, wnd_to_activate, title)
         
         events = []
         if btn_flags & 0x0001: events.append((0x0002, 0)) # LEFTDOWN
@@ -752,43 +806,47 @@ class DualPointerEngine:
                                     if target == 'm1': self.m1_rdown = False
                                     else: self.m2_rdown = False
 
-                                # 1. MOUSE 1 (MONITOR X)
+                                # --- ÁREA DE TRABALHO 1 (MOUSE 1 / LUGAR 1) ---
                                 if target == 'm1':
                                     sens1 = float(self.config.get("mouse1", {}).get("sensitivity", 1.0))
                                     if dx or dy:
                                         self.pos1[0] += dx * sens1
                                         self.pos1[1] += dy * sens1
                                         self.pos1[0], self.pos1[1] = clamp_to_bounds(self.pos1[0], self.pos1[1], self.bounds1)
+                                        
+                                        # Atualiza cursor do sistema APENAS se estiver em arraste contínuo
+                                        if self.m1_down or self.m1_rdown:
+                                            user32.SetCursorPos(int(self.pos1[0]), int(self.pos1[1]))
                                     
-                                    # Se Mouse 2 não estiver segurando arraste no Monitor Y:
-                                    if not self.m2_down and not self.m2_rdown:
-                                        user32.SetCursorPos(int(self.pos1[0]), int(self.pos1[1]))
+                                    # Despacha cliques/rolagem cirurgicamente na Área de Trabalho 1
+                                    if btn_flags:
+                                        self._inject_click(int(self.pos1[0]), int(self.pos1[1]), btn_flags, btn_data, 'm1')
                                         self.active_mouse = 'm1'
                                         
-                                    # Injeta clique/rolagem cirurgicamente no Monitor X
-                                    # (Se Mouse 2 estiver arrastando, não interrompe o drag do 2)
-                                    if btn_flags:
-                                        if not self.m2_down and not self.m2_rdown:
-                                            self._inject_click(int(self.pos1[0]), int(self.pos1[1]), btn_flags, btn_data)
+                                        # Se a Área 2 estava em modo de arraste contínuo, restaura o foco da Área 2
+                                        if (self.m2_down or self.m2_rdown) and not (self.m1_down or self.m1_rdown):
+                                            user32.SetCursorPos(int(self.pos2[0]), int(self.pos2[1]))
 
-                                # 2. MOUSE 2 (MONITOR Y)
+                                # --- ÁREA DE TRABALHO 2 (MOUSE 2 / LUGAR 2) ---
                                 else:
                                     sens2 = float(self.config.get("mouse2", {}).get("sensitivity", 1.0))
                                     if dx or dy:
                                         self.pos2[0] += dx * sens2
                                         self.pos2[1] += dy * sens2
                                         self.pos2[0], self.pos2[1] = clamp_to_bounds(self.pos2[0], self.pos2[1], self.bounds2)
+                                        
+                                        # Atualiza cursor do sistema APENAS se estiver em arraste contínuo
+                                        if self.m2_down or self.m2_rdown:
+                                            user32.SetCursorPos(int(self.pos2[0]), int(self.pos2[1]))
                                     
-                                    # Se Mouse 1 não estiver segurando arraste no Monitor X:
-                                    if not self.m1_down and not self.m1_rdown:
-                                        user32.SetCursorPos(int(self.pos2[0]), int(self.pos2[1]))
+                                    # Despacha cliques/rolagem cirurgicamente na Área de Trabalho 2
+                                    if btn_flags:
+                                        self._inject_click(int(self.pos2[0]), int(self.pos2[1]), btn_flags, btn_data, 'm2')
                                         self.active_mouse = 'm2'
                                         
-                                    # Injeta clique/rolagem cirurgicamente no Monitor Y
-                                    # (Se Mouse 1 estiver arrastando, não interrompe o drag do 1)
-                                    if btn_flags:
-                                        if not self.m1_down and not self.m1_rdown:
-                                            self._inject_click(int(self.pos2[0]), int(self.pos2[1]), btn_flags, btn_data)
+                                        # Se a Área 1 estava em modo de arraste contínuo, restaura o foco da Área 1
+                                        if (self.m1_down or self.m1_rdown) and not (self.m2_down or self.m2_rdown):
+                                            user32.SetCursorPos(int(self.pos1[0]), int(self.pos1[1]))
                                 
                                 # Modo de simulação para testes com 1 mouse
                                 if self.simulation_mode and target == 'm1':

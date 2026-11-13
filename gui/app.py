@@ -77,6 +77,8 @@ class DualPointerApp:
         
         # Conecta callbacks do motor
         self.engine.on_device_activity = self._on_device_activity
+        self.engine.on_positions_updated = self._on_engine_positions_updated
+        self.engine.on_workspace_focus_changed = self._on_workspace_focus_changed
         
     def _init_styles(self):
         style = ttk.Style(self.root)
@@ -151,7 +153,7 @@ class DualPointerApp:
         self.tab_system = tk.Frame(self.notebook, bg=BG_DARK, padx=12, pady=12)
         self.tab_about = tk.Frame(self.notebook, bg=BG_DARK, padx=12, pady=12)
         
-        self.notebook.add(self.tab_mice, text=" 🖱️ Mouses & Hardware (USB) ")
+        self.notebook.add(self.tab_mice, text=" 🏢 Áreas de Trabalho (Estações) ")
         self.notebook.add(self.tab_cursors, text=" 🎨 Design dos Ponteiros ")
         self.notebook.add(self.tab_system, text=" 🖥️ Monitores & Sistema ")
         self.notebook.add(self.tab_about, text=" ℹ️ Sobre ")
@@ -162,82 +164,117 @@ class DualPointerApp:
         self._setup_tab_about()
 
     def _setup_tab_mice(self):
-        # Container com 2 colunas para Mouse 1 e Mouse 2
+        # Banner explicativo da arquitetura de Lugares de Trabalho
+        top_banner = tk.Frame(self.tab_mice, bg="#131B2E", padx=14, pady=10, relief=tk.GROOVE, bd=1)
+        top_banner.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(
+            top_banner,
+            text="🏢 Gerenciador de Áreas de Trabalho Independentes (Multi-Seat)",
+            font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg="#131B2E"
+        ).pack(anchor="w")
+        
+        tk.Label(
+            top_banner,
+            text="Cada Área de Trabalho opera com seu monitor e mouse dedicado. Os cliques, movimentos e janelas de uma área NÃO bloqueiam e NUNCA interferem na outra.",
+            font=("Segoe UI", 8), fg=TEXT_MUTED, bg="#131B2E"
+        ).pack(anchor="w", pady=(2, 0))
+
+        # Container com 2 colunas para Área 1 e Área 2
         cards_container = tk.Frame(self.tab_mice, bg=BG_DARK)
         cards_container.pack(fill=tk.BOTH, expand=True)
         cards_container.columnconfigure(0, weight=1)
         cards_container.columnconfigure(1, weight=1)
         
-        # --- CARD MOUSE 1 ---
+        # --- CARD ÁREA DE TRABALHO 1 (LUGAR 1) ---
         card_m1 = tk.LabelFrame(
-            cards_container, text="  Mouse 1 (Primário)  ",
+            cards_container, text="  🏢 Área de Trabalho 1 (Lugar 1 - Estação A)  ",
             bg=BG_CARD, fg=ACCENT_BLUE, font=("Segoe UI", 11, "bold"),
             relief=tk.GROOVE, padx=14, pady=12
         )
         card_m1.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
         
-        tk.Label(card_m1, text="Dispositivo USB (Hardware ID):", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 4))
+        tk.Label(card_m1, text="Dispositivo USB Dedicado (Hardware ID):", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 4))
         self.cb_m1_device = ttk.Combobox(card_m1, state="readonly", font=("Segoe UI", 9))
-        self.cb_m1_device.pack(fill=tk.X, pady=(0, 8))
+        self.cb_m1_device.pack(fill=tk.X, pady=(0, 6))
         self.cb_m1_device.bind("<<ComboboxSelected>>", self._on_m1_device_selected)
         
         self.lbl_m1_hwid_detail = tk.Label(card_m1, text="HWID: --", font=("Consolas", 8), fg=TEXT_MUTED, bg=BG_CARD, wraplength=340, justify="left")
-        self.lbl_m1_hwid_detail.pack(anchor="w", pady=(0, 10))
+        self.lbl_m1_hwid_detail.pack(anchor="w", pady=(0, 8))
         
-        tk.Label(card_m1, text="Monitor Atribuído:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(4, 2))
+        tk.Label(card_m1, text="Monitor Associado ao Lugar 1:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 2))
         self.cb_m1_monitor = ttk.Combobox(card_m1, state="readonly", font=("Segoe UI", 9))
-        self.cb_m1_monitor.pack(fill=tk.X, pady=(0, 10))
+        self.cb_m1_monitor.pack(fill=tk.X, pady=(0, 8))
         self.cb_m1_monitor.bind("<<ComboboxSelected>>", self._on_m1_monitor_selected)
         
         # Sensibilidade
         sens_box1 = tk.Frame(card_m1, bg=BG_CARD)
-        sens_box1.pack(fill=tk.X, pady=(4, 10))
-        tk.Label(sens_box1, text="Sensibilidade:", font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
+        sens_box1.pack(fill=tk.X, pady=(2, 8))
+        tk.Label(sens_box1, text="Sensibilidade do Ponteiro:", font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
         self.lbl_m1_sens_val = tk.Label(sens_box1, text="1.0x", font=("Segoe UI", 9, "bold"), fg=ACCENT_BLUE, bg=BG_CARD)
         self.lbl_m1_sens_val.pack(side=tk.RIGHT)
         
         self.scale_m1_sens = ttk.Scale(card_m1, from_=0.4, to=2.5, command=self._on_m1_sens_changed)
         self.scale_m1_sens.set(float(self.config.get("mouse1", {}).get("sensitivity", 1.0)))
-        self.scale_m1_sens.pack(fill=tk.X)
+        self.scale_m1_sens.pack(fill=tk.X, pady=(0, 8))
         
-        # Indicador de atividade
-        self.lbl_m1_active = tk.Label(card_m1, text="● Aguardando movimento", font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_CARD)
-        self.lbl_m1_active.pack(anchor="w", pady=(12, 0))
+        # Painel de Monitoramento em Tempo Real do Lugar 1
+        mon_panel_1 = tk.Frame(card_m1, bg="#0F172A", padx=10, pady=8, relief=tk.SOLID, bd=1)
+        mon_panel_1.pack(fill=tk.X, pady=(6, 0))
         
-        # --- CARD MOUSE 2 ---
+        self.lbl_m1_pos = tk.Label(mon_panel_1, text="📍 Coordenadas: X: 0, Y: 0", font=("Segoe UI", 8, "bold"), fg=ACCENT_BLUE, bg="#0F172A")
+        self.lbl_m1_pos.pack(anchor="w")
+        
+        self.lbl_m1_window = tk.Label(mon_panel_1, text="🪟 Janela Ativa: Aguardando foco...", font=("Segoe UI", 8), fg=TEXT_PRIMARY, bg="#0F172A")
+        self.lbl_m1_window.pack(anchor="w", pady=(2, 2))
+        
+        self.lbl_m1_active = tk.Label(mon_panel_1, text="● Lugar 1 Operando Isoladamente", font=("Segoe UI", 8), fg=ACCENT_GREEN, bg="#0F172A")
+        self.lbl_m1_active.pack(anchor="w")
+        
+        # --- CARD ÁREA DE TRABALHO 2 (LUGAR 2) ---
         card_m2 = tk.LabelFrame(
-            cards_container, text="  Mouse 2 (Secundário)  ",
+            cards_container, text="  🏢 Área de Trabalho 2 (Lugar 2 - Estação B)  ",
             bg=BG_CARD, fg=ACCENT_ORANGE, font=("Segoe UI", 11, "bold"),
             relief=tk.GROOVE, padx=14, pady=12
         )
         card_m2.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
         
-        tk.Label(card_m2, text="Dispositivo USB (Hardware ID):", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 4))
+        tk.Label(card_m2, text="Dispositivo USB Dedicado (Hardware ID):", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 4))
         self.cb_m2_device = ttk.Combobox(card_m2, state="readonly", font=("Segoe UI", 9))
-        self.cb_m2_device.pack(fill=tk.X, pady=(0, 8))
+        self.cb_m2_device.pack(fill=tk.X, pady=(0, 6))
         self.cb_m2_device.bind("<<ComboboxSelected>>", self._on_m2_device_selected)
         
         self.lbl_m2_hwid_detail = tk.Label(card_m2, text="HWID: --", font=("Consolas", 8), fg=TEXT_MUTED, bg=BG_CARD, wraplength=340, justify="left")
-        self.lbl_m2_hwid_detail.pack(anchor="w", pady=(0, 10))
+        self.lbl_m2_hwid_detail.pack(anchor="w", pady=(0, 8))
         
-        tk.Label(card_m2, text="Monitor Atribuído:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(4, 2))
+        tk.Label(card_m2, text="Monitor Associado ao Lugar 2:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 2))
         self.cb_m2_monitor = ttk.Combobox(card_m2, state="readonly", font=("Segoe UI", 9))
-        self.cb_m2_monitor.pack(fill=tk.X, pady=(0, 10))
+        self.cb_m2_monitor.pack(fill=tk.X, pady=(0, 8))
         self.cb_m2_monitor.bind("<<ComboboxSelected>>", self._on_m2_monitor_selected)
         
         # Sensibilidade
         sens_box2 = tk.Frame(card_m2, bg=BG_CARD)
-        sens_box2.pack(fill=tk.X, pady=(4, 10))
-        tk.Label(sens_box2, text="Sensibilidade:", font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
+        sens_box2.pack(fill=tk.X, pady=(2, 8))
+        tk.Label(sens_box2, text="Sensibilidade do Ponteiro:", font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
         self.lbl_m2_sens_val = tk.Label(sens_box2, text="1.0x", font=("Segoe UI", 9, "bold"), fg=ACCENT_ORANGE, bg=BG_CARD)
         self.lbl_m2_sens_val.pack(side=tk.RIGHT)
         
         self.scale_m2_sens = ttk.Scale(card_m2, from_=0.4, to=2.5, command=self._on_m2_sens_changed)
         self.scale_m2_sens.set(float(self.config.get("mouse2", {}).get("sensitivity", 1.0)))
-        self.scale_m2_sens.pack(fill=tk.X)
+        self.scale_m2_sens.pack(fill=tk.X, pady=(0, 8))
         
-        self.lbl_m2_active = tk.Label(card_m2, text="● Aguardando movimento", font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_CARD)
-        self.lbl_m2_active.pack(anchor="w", pady=(12, 0))
+        # Painel de Monitoramento em Tempo Real do Lugar 2
+        mon_panel_2 = tk.Frame(card_m2, bg="#0F172A", padx=10, pady=8, relief=tk.SOLID, bd=1)
+        mon_panel_2.pack(fill=tk.X, pady=(6, 0))
+        
+        self.lbl_m2_pos = tk.Label(mon_panel_2, text="📍 Coordenadas: X: 0, Y: 0", font=("Segoe UI", 8, "bold"), fg=ACCENT_ORANGE, bg="#0F172A")
+        self.lbl_m2_pos.pack(anchor="w")
+        
+        self.lbl_m2_window = tk.Label(mon_panel_2, text="🪟 Janela Ativa: Aguardando foco...", font=("Segoe UI", 8), fg=TEXT_PRIMARY, bg="#0F172A")
+        self.lbl_m2_window.pack(anchor="w", pady=(2, 2))
+        
+        self.lbl_m2_active = tk.Label(mon_panel_2, text="● Lugar 2 Operando Isoladamente", font=("Segoe UI", 8), fg=ACCENT_GREEN, bg="#0F172A")
+        self.lbl_m2_active.pack(anchor="w")
 
         # Barra inferior de ações
         action_bar = tk.Frame(self.tab_mice, bg=BG_DARK)
@@ -250,6 +287,13 @@ class DualPointerApp:
             command=self.refresh_devices
         )
         btn_refresh.pack(side=tk.LEFT)
+        
+        lbl_policy = tk.Label(
+            action_bar,
+            text="🛡️ Modo Multiseat Ativo: Cliques e janelas não se bloqueiam nem se cancelam.",
+            font=("Segoe UI", 8, "bold"), fg=ACCENT_GREEN, bg=BG_DARK
+        )
+        lbl_policy.pack(side=tk.RIGHT, padx=10)
 
     def _setup_tab_cursors(self):
         # Seletor do mouse a configurar (Mouse 1 / Mouse 2)
@@ -762,13 +806,28 @@ class DualPointerApp:
             self.btn_toggle_engine.config(text="Ativar Motor", bg="#16A34A", activebackground="#15803D")
 
     def _on_device_activity(self, target: str):
-        """Atualiza indicadores visuais de atividade quando um mouse se move."""
+        """Atualiza indicadores visuais de atividade quando um mouse se move ou clica."""
         if target == 'm1':
-            self.lbl_m1_active.config(text="● Movendo / Clicando...", fg=ACCENT_GREEN)
-            self.root.after(300, lambda: self.lbl_m1_active.config(text="● Conectado e Ativo", fg=TEXT_MUTED))
+            self.lbl_m1_active.config(text="● Lugar 1 Clicando / Movendo...", fg=ACCENT_GREEN)
+            self.root.after(300, lambda: self.lbl_m1_active.config(text="● Lugar 1 Operando Isoladamente", fg=ACCENT_GREEN))
         else:
-            self.lbl_m2_active.config(text="● Movendo / Clicando...", fg=ACCENT_ORANGE)
-            self.root.after(300, lambda: self.lbl_m2_active.config(text="● Conectado e Ativo", fg=TEXT_MUTED))
+            self.lbl_m2_active.config(text="● Lugar 2 Clicando / Movendo...", fg=ACCENT_ORANGE)
+            self.root.after(300, lambda: self.lbl_m2_active.config(text="● Lugar 2 Operando Isoladamente", fg=ACCENT_GREEN))
+
+    def _on_engine_positions_updated(self, x1, y1, x2, y2):
+        """Atualiza coordenadas em tempo real das Áreas de Trabalho na interface."""
+        if hasattr(self, 'lbl_m1_pos'):
+            self.lbl_m1_pos.config(text=f"📍 Coordenadas: X: {int(x1)}, Y: {int(y1)}")
+        if hasattr(self, 'lbl_m2_pos'):
+            self.lbl_m2_pos.config(text=f"📍 Coordenadas: X: {int(x2)}, Y: {int(y2)}")
+
+    def _on_workspace_focus_changed(self, seat: str, hwnd: int, title: str):
+        """Atualiza a janela em foco de cada Área de Trabalho na interface."""
+        clean_title = (title[:34] + '...') if len(title) > 36 else (title or "Área de Trabalho / Desktop")
+        if seat == "m1" and hasattr(self, 'lbl_m1_window'):
+            self.root.after(0, lambda: self.lbl_m1_window.config(text=f"🪟 Janela Ativa: {clean_title}"))
+        elif seat == "m2" and hasattr(self, 'lbl_m2_window'):
+            self.root.after(0, lambda: self.lbl_m2_window.config(text=f"🪟 Janela Ativa: {clean_title}"))
 
     def save_and_apply(self):
         save_config(self.config)

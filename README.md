@@ -15,6 +15,12 @@ Com suporte nativo a múltiplos monitores, personalização visual de ponteiros 
 
 ## ✨ Principais Funcionalidades
 
+- **Áreas de Trabalho Independentes (Estações de Trabalho Multi-Seat):**
+  - Divide a experiência do computador em **Lugares de Trabalho (Workplaces / Estações)** configuráveis diretamente no aplicativo.
+  - **Lugar de Trabalho 1 (Área 1)**: Opera com seu monitor dedicado e seu mouse USB exclusivo.
+  - **Lugar de Trabalho 2 (Área 2)**: Opera com seu monitor dedicado e seu mouse USB exclusivo.
+  - **Isolamento Total de Cliques e Movimento (Zero Interferência)**: O clique do mouse em uma área NUNCA bloqueia, congela ou cancela o clique do mouse na outra área. Movimentos em uma tela não disputam a posição do ponteiro na outra.
+  - **Rastreamento de Foco e Janelas Ativas**: Cada Área de Trabalho identifica e exibe em tempo real o aplicativo ativo que está em uso, mantendo o controle das janelas de cada monitor.
 - **Controle Simultâneo e Independente Total:**
   - Suprime a interferência mútua entre mouses usando **Windows Raw Input API (`WM_INPUT`)** e um **Low-Level Hook (`WH_MOUSE_LL`)**.
   - Movimentos, cliques, **segurar e arrastar (Drag & Drop)** e rolagem da roda (scroll) de um mouse no Monitor X **não interferem nem interrompem** o mouse no Monitor Y.

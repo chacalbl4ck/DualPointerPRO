@@ -6,6 +6,7 @@
         "github": "chacalbl4ck"
     },
     "mouse1": {
+        "workspace_name": "Área de Trabalho 1 (Estação A)",
         "hwid": "VID_046D&PID_C077",
         "instance_id": "6&34e61bd2&0&0000",
         "friendly_name": "HID-compliant mouse",
@@ -17,26 +18,27 @@
             "shape": "sleek",
             "color": "#38BDF8",
             "border_color": "#FFFFFF",
-            "size": 21,
-            "glow": false,
+            "size": 28,
+            "glow": true,
             "show_label": true,
             "label_text": "1"
         }
     },
     "mouse2": {
-        "hwid": "VID_046D&PID_C077",
-        "instance_id": "6&34e61bd2&0&0000",
-        "friendly_name": "HID-compliant mouse",
+        "workspace_name": "Área de Trabalho 2 (Estação B)",
+        "hwid": "",
+        "instance_id": "",
+        "friendly_name": "Mouse Secundário",
         "monitors": [
-            1
+            2
         ],
         "sensitivity": 1.0,
         "cursor": {
             "shape": "sleek",
             "color": "#FB923C",
             "border_color": "#FFFFFF",
-            "size": 20,
-            "glow": false,
+            "size": 28,
+            "glow": true,
             "show_label": true,
             "label_text": "2"
         }
@@ -47,6 +49,8 @@
         "simulation_mode": false,
         "failsafe_hotkey": "F12",
         "hide_os_cursor": true,
-        "suppress_os_cursor": false
+        "suppress_os_cursor": false,
+        "isolate_workspaces": true,
+        "multiseat_mode": true
     }
 }

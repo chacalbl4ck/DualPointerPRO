@@ -161,25 +161,25 @@ def draw_cursor_on_canvas(canvas, cx: float, cy: float, cursor_cfg: Dict[str, An
     if show_label and label_text:
         badge_x = cx + size * 0.72
         badge_y = cy + size * 0.62
-        pw = max(9, len(label_text) * 4 + 3)
-        ph = 7
         
-        # Sombra da pílula
-        canvas.create_rectangle(
-            badge_x - pw + 1, badge_y - ph + 1,
-            badge_x + pw + 1, badge_y + ph + 1,
-            fill="#020617", outline=""
-        )
-        # Corpo da pílula arredondada em dark slate com borda na cor do mouse
-        canvas.create_rectangle(
-            badge_x - pw, badge_y - ph,
-            badge_x + pw, badge_y + ph,
-            fill="#0F172A", outline=color, width=1.5
-        )
-        # Texto branco centralizado
+        if len(label_text) == 1:
+            r = max(6.5, size * 0.22)
+            # Sombra
+            canvas.create_oval(badge_x - r + 1, badge_y - r + 1, badge_x + r + 1, badge_y + r + 1, fill="#020617", outline="")
+            # Círculo Dark Slate com borda da cor do ponteiro
+            canvas.create_oval(badge_x - r, badge_y - r, badge_x + r, badge_y + r, fill="#0F172A", outline=color, width=1.5)
+        else:
+            pw = max(9.0, len(label_text) * 4.5 + 4)
+            ph = max(6.5, size * 0.20)
+            # Sombra
+            canvas.create_rectangle(badge_x - pw + 1, badge_y - ph + 1, badge_x + pw + 1, badge_y + ph + 1, fill="#020617", outline="")
+            # Corpo
+            canvas.create_rectangle(badge_x - pw, badge_y - ph, badge_x + pw, badge_y + ph, fill="#0F172A", outline=color, width=1.5)
+            
+        # Texto branco centralizado com fonte Segoe UI
         canvas.create_text(
             badge_x, badge_y,
             text=label_text,
             fill="#FFFFFF",
-            font=("Segoe UI", int(max(7, size * 0.28)), "bold")
+            font=("Segoe UI", int(max(7, size * 0.26)), "bold")
         )

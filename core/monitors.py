@@ -113,11 +113,12 @@ def get_monitor_bounds_for_indices(monitor_indices: Optional[List[int]]) -> Tupl
     bottom = max(m['bottom'] for m in selected)
     return left, top, right, bottom
 
-def clamp_to_bounds(x: float, y: float, bounds: Tuple[int, int, int, int]) -> Tuple[int, int]:
+def clamp_to_bounds(x: float, y: float, bounds: Tuple[int, int, int, int]) -> Tuple[float, float]:
     """
-    Garante que a coordenada (x, y) não saia dos limites do(s) monitor(es) atribuído(s).
+    Garante que a coordenada (x, y) não saia dos limites do(s) monitor(es) atribuído(s),
+    preservando frações sub-pixel para precisão e fluidez máxima.
     """
     left, top, right, bottom = bounds
-    clamped_x = max(left, min(int(x), right - 1))
-    clamped_y = max(top, min(int(y), bottom - 1))
+    clamped_x = max(float(left), min(float(x), float(right - 1)))
+    clamped_y = max(float(top), min(float(y), float(bottom - 1)))
     return clamped_x, clamped_y

@@ -1,14 +1,19 @@
 """
-Interface Gráfica de Configuração (GUI)
+Interface Gráfica de Configuração Moderna e Elegante (GUI)
 DualPointer Pro - Gerenciador Multi-Mouse & Multi-Monitor
+Desenvolvido por Caio Monteiro (GitHub: chacalbl4ck)
 """
 
 import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox
 import webbrowser
+import threading
+import time
 import os
 import sys
 from typing import Dict, Any, List
+
+from PIL import Image, ImageTk
 
 from core.config import load_config, save_config
 from core.devices import get_connected_mice
@@ -17,28 +22,36 @@ from core.startup import is_startup_enabled, set_startup_enabled
 from core.engine import DualPointerEngine
 from gui.cursor_draw import draw_cursor_on_canvas
 
-# Cores do Tema Moderno Dark Slate
-BG_DARK = "#0F172A"       # Fundo principal
-BG_CARD = "#1E293B"       # Cartões e containers
-BG_HOVER = "#334155"      # Elementos com hover
-BG_INPUT = "#0F172A"      # Campos de entrada
-TEXT_PRIMARY = "#F8FAFC"  # Texto principal branco
-TEXT_MUTED = "#94A3B8"    # Texto secundário acinzentado
-ACCENT_BLUE = "#38BDF8"   # Destaque azul
-ACCENT_GREEN = "#10B981"  # Verde ativo
-ACCENT_ORANGE = "#F59E0B" # Laranja aviso
-BORDER_COLOR = "#334155"  # Bordas sutis
+# --- PALETA DE CORES MODERNA (DARK OBSIDIAN & GLASS) ---
+BG_MAIN = "#0B0F19"          # Fundo principal ultra-escuro
+BG_SURFACE = "#131B2E"       # Superfície dos cartões e containers
+BG_SURFACE_LIGHT = "#1C263D" # Hover e elementos secundários
+BG_INSET = "#090D16"         # Fundo rebaixado para caixas de telemetria e inputs
+BORDER_SUBTLE = "#1F2C45"    # Bordas finas e discretas
+BORDER_FOCUS = "#38BDF8"     # Borda de foco / destaque ciano
+
+TEXT_PRIMARY = "#F8FAFC"     # Branco puro para títulos e texto de alto contraste
+TEXT_SECONDARY = "#94A3B8"   # Cinza ardósia para rótulos secundários
+TEXT_MUTED = "#64748B"       # Cinza atenuado para notas e rodapé
+
+ACCENT_CYAN = "#38BDF8"      # Ciano elétrico (Lugar 1 / Mouse 1)
+ACCENT_ORANGE = "#FB923C"    # Laranja cyber (Lugar 2 / Mouse 2)
+ACCENT_GREEN = "#10B981"     # Verde esmeralda (Ativo / Online)
+ACCENT_RED = "#EF4444"       # Vermelho alerta (Pausado / Atenção)
+ACCENT_BLUE = "#0284C7"      # Azul primário para botões principais
+ACCENT_PURPLE = "#A855F7"    # Roxo neon complementar
 
 PALETTE_PRESETS = [
     ("#38BDF8", "Ciano Ártico"),
-    ("#FB923C", "Sunset Coral"),
+    ("#FB923C", "Laranja Sunset"),
     ("#10B981", "Verde Esmeralda"),
-    ("#F43F5E", "Rosa Neon"),
     ("#A855F7", "Roxo Cyber"),
-    ("#FBBF24", "Âmbar / Dourado"),
+    ("#F43F5E", "Rosa Neon"),
+    ("#F59E0B", "Ouro Solar"),
     ("#FFFFFF", "Branco Puro"),
-    ("#64748B", "Cinza Titânio")
+    ("#06B6D4", "Turquesa"),
 ]
+
 
 class DualPointerApp:
     def __init__(self, root: tk.Tk, engine: DualPointerEngine, config: Dict[str, Any]):
@@ -47,295 +60,425 @@ class DualPointerApp:
         self.config = config
         
         self.root.title("DualPointer Pro - Gerenciador Multi-Mouse & Multi-Monitor")
-        self.root.geometry("860x700")
-        self.root.minsize(780, 620)
-        self.root.configure(bg=BG_DARK)
+        self.root.geometry("880x720")
+        self.root.minsize(800, 640)
+        self.root.configure(bg=BG_MAIN)
         
-        # Define ícone da janela
+        # Localização de recursos (ícone .ico e .png)
         base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        icon_path = os.path.join(base_dir, "assets", "icon.ico")
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join(os.path.dirname(sys.executable), "assets", "icon.ico")
+        self.assets_dir = os.path.join(base_dir, "assets")
+        if not os.path.exists(self.assets_dir):
+            self.assets_dir = os.path.join(os.path.dirname(sys.executable), "assets")
+            
+        icon_path = os.path.join(self.assets_dir, "icon.ico")
         if os.path.exists(icon_path):
             try:
                 self.root.iconbitmap(icon_path)
             except Exception:
                 pass
 
-        # Dados em tempo real
+        # Referência de imagem da logo para prevenir garbage collection
+        self.logo_img = None
+        self._load_logo()
+
+        # Dados de hardware
         self.connected_mice: List[Dict] = []
         self.connected_monitors: List[Dict] = []
+        self.current_tab = "mice"
+        self.tabs: Dict[str, tk.Frame] = {}
+        self.tab_buttons: Dict[str, tk.Button] = {}
         
-        self._init_styles()
+        self._init_ttk_styles()
         self._build_header()
-        self._build_notebook()
+        self._build_navbar()
+        self._build_content_area()
         self._build_footer()
         
-        # Atualiza listas iniciais
+        # Inicializa dispositivos e monitores
         self.refresh_devices()
         self.refresh_monitors()
         
-        # Conecta callbacks do motor
-        self.engine.on_device_activity = self._on_device_activity
-        self.engine.on_positions_updated = self._on_engine_positions_updated
-        self.engine.on_workspace_focus_changed = self._on_workspace_focus_changed
-        
-    def _init_styles(self):
+        # Inicia loop de telemetria a 30 FPS puramente na thread da GUI
+        # (Elimina 100% de deadlocks e congelamento ao trocar de aba)
+        self._start_telemetry_loop()
+
+    def _load_logo(self):
+        png_path = os.path.join(self.assets_dir, "icon.png")
+        if os.path.exists(png_path):
+            try:
+                pil_img = Image.open(png_path).resize((36, 36), Image.Resampling.LANCZOS)
+                self.logo_img = ImageTk.PhotoImage(pil_img)
+            except Exception:
+                self.logo_img = None
+
+    def _init_ttk_styles(self):
         style = ttk.Style(self.root)
         style.theme_use("clam")
         
-        # Abas
-        style.configure("TNotebook", background=BG_DARK, borderwidth=0)
-        style.configure("TNotebook.Tab", background=BG_CARD, foreground=TEXT_MUTED, padding=[16, 8], font=("Segoe UI", 10, "bold"))
-        style.map("TNotebook.Tab",
-            background=[("selected", BG_HOVER), ("active", BG_CARD)],
-            foreground=[("selected", ACCENT_BLUE), ("active", TEXT_PRIMARY)]
+        # Estilização moderna para Comboboxes
+        style.configure(
+            "TCombobox",
+            fieldbackground=BG_INSET,
+            background=BG_SURFACE_LIGHT,
+            foreground=TEXT_PRIMARY,
+            darkcolor=BORDER_SUBTLE,
+            lightcolor=BORDER_SUBTLE,
+            arrowcolor=ACCENT_CYAN,
+            bordercolor=BORDER_SUBTLE,
+            padding=5
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", BG_INSET)],
+            selectbackground=[("readonly", BG_SURFACE_LIGHT)],
+            selectforeground=[("readonly", TEXT_PRIMARY)],
+            foreground=[("readonly", TEXT_PRIMARY)]
         )
         
-        # Combobox
-        style.configure("TCombobox", fieldbackground=BG_INPUT, background=BG_CARD, foreground=TEXT_PRIMARY, arrowcolor=ACCENT_BLUE)
-        style.map("TCombobox", fieldbackground=[("readonly", BG_INPUT)], foreground=[("readonly", TEXT_PRIMARY)])
+        # Estilização de Checkbuttons modernos
+        style.configure(
+            "TCheckbutton",
+            background=BG_SURFACE,
+            foreground=TEXT_PRIMARY,
+            font=("Segoe UI", 9)
+        )
+        style.map(
+            "TCheckbutton",
+            background=[("active", BG_SURFACE)],
+            foreground=[("active", ACCENT_CYAN)]
+        )
         
-        # Sliders (Scale)
-        style.configure("TScale", background=BG_CARD, troughcolor=BG_DARK)
-        
-        # Checkbuttons
-        style.configure("TCheckbutton", background=BG_CARD, foreground=TEXT_PRIMARY, font=("Segoe UI", 9))
-        style.map("TCheckbutton", background=[("active", BG_CARD)], foreground=[("active", ACCENT_BLUE)])
+        # Estilização de Sliders modernos
+        style.configure(
+            "Horizontal.TScale",
+            background=BG_SURFACE,
+            troughcolor=BG_INSET,
+            bordercolor=BORDER_SUBTLE,
+            lightcolor=ACCENT_CYAN,
+            darkcolor=ACCENT_CYAN
+        )
 
+    def _bind_combobox_topmost(self, cb: ttk.Combobox):
+        """Garante que o cursor overlay permaneça sempre acima da lista suspensa ao clicar."""
+        cb.bind("<Button-1>", lambda e: self.engine.assert_topmost(), add="+")
+        cb.bind("<FocusIn>", lambda e: self.engine.assert_topmost(), add="+")
+
+    # =========================================================================
+    # HEADER BAR
+    # =========================================================================
     def _build_header(self):
-        header_frame = tk.Frame(self.root, bg=BG_DARK, pady=12, padx=20)
-        header_frame.pack(fill=tk.X)
+        header = tk.Frame(self.root, bg=BG_SURFACE, padx=20, pady=12, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        header.pack(fill=tk.X)
         
-        # Título e Subtítulo
-        title_box = tk.Frame(header_frame, bg=BG_DARK)
+        # Lado Esquerdo: Identidade Visual e Nome do Software
+        brand_frame = tk.Frame(header, bg=BG_SURFACE)
+        brand_frame.pack(side=tk.LEFT, fill=tk.Y)
+        
+        if self.logo_img:
+            lbl_logo = tk.Label(brand_frame, image=self.logo_img, bg=BG_SURFACE)
+            lbl_logo.pack(side=tk.LEFT, padx=(0, 12))
+        else:
+            lbl_logo_fallback = tk.Label(brand_frame, text="⚡", font=("Segoe UI", 20, "bold"), fg=ACCENT_CYAN, bg=BG_SURFACE)
+            lbl_logo_fallback.pack(side=tk.LEFT, padx=(0, 10))
+            
+        title_box = tk.Frame(brand_frame, bg=BG_SURFACE)
         title_box.pack(side=tk.LEFT)
         
-        lbl_title = tk.Label(
-            title_box, text="DUALPOINTER PRO",
-            font=("Segoe UI", 16, "bold"), fg=TEXT_PRIMARY, bg=BG_DARK
+        top_title = tk.Frame(title_box, bg=BG_SURFACE)
+        top_title.pack(anchor="w")
+        
+        lbl_title = tk.Label(top_title, text="DualPointer Pro", font=("Segoe UI", 14, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE)
+        lbl_title.pack(side=tk.LEFT)
+        
+        lbl_ver = tk.Label(
+            top_title, text=" v1.1 Multi-Seat ", font=("Segoe UI", 8, "bold"),
+            fg=ACCENT_CYAN, bg="#0E2238", padx=6, pady=1
         )
-        lbl_title.pack(anchor="w")
+        lbl_ver.pack(side=tk.LEFT, padx=(8, 0))
         
         lbl_sub = tk.Label(
-            title_box, text="Controle independente e simultâneo de múltiplos mouses e telas",
-            font=("Segoe UI", 9), fg=TEXT_MUTED, bg=BG_DARK
+            title_box, text="Isolamento Total de Movimentos, Cliques e Janelas Multi-Monitor",
+            font=("Segoe UI", 8), fg=TEXT_SECONDARY, bg=BG_SURFACE
         )
-        lbl_sub.pack(anchor="w")
+        lbl_sub.pack(anchor="w", pady=(1, 0))
         
-        # Controles do Topo (Status e Botão Mestre)
-        controls_box = tk.Frame(header_frame, bg=BG_DARK)
-        controls_box.pack(side=tk.RIGHT)
+        # Lado Direito: Status e Controle Mestre
+        ctrl_frame = tk.Frame(header, bg=BG_SURFACE)
+        ctrl_frame.pack(side=tk.RIGHT)
+        
+        is_active = self.engine.is_active()
+        status_text = "● MOTOR ATIVO" if is_active else "❚❚ PAUSADO"
+        status_fg = ACCENT_GREEN if is_active else ACCENT_ORANGE
+        status_bg = "#064E3B" if is_active else "#78350F"
         
         self.lbl_status_pill = tk.Label(
-            controls_box, text="● ATIVO",
-            font=("Segoe UI", 9, "bold"), fg=ACCENT_GREEN, bg="#064E3B",
-            padx=12, pady=4
+            ctrl_frame, text=status_text, font=("Segoe UI", 9, "bold"),
+            fg=status_fg, bg=status_bg, padx=12, pady=5, relief=tk.FLAT
         )
-        self.lbl_status_pill.pack(side=tk.LEFT, padx=10)
+        self.lbl_status_pill.pack(side=tk.LEFT, padx=(0, 12))
+        
+        btn_text = "Pausar Motor" if is_active else "Ativar Motor"
+        btn_bg = "#DC2626" if is_active else "#16A34A"
         
         self.btn_toggle_engine = tk.Button(
-            controls_box, text="Pausar Motor",
-            font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg="#DC2626",
-            activebackground="#B91C1C", activeforeground="#FFFFFF",
-            relief=tk.FLAT, padx=14, pady=5, cursor="hand2",
-            command=self._on_toggle_engine_clicked
+            ctrl_frame, text=btn_text, font=("Segoe UI", 9, "bold"),
+            fg="#FFFFFF", bg=btn_bg, activebackground="#991B1B", relief=tk.FLAT,
+            padx=14, pady=5, cursor="hand2", command=self._on_toggle_engine_clicked
         )
         self.btn_toggle_engine.pack(side=tk.LEFT)
 
-    def _build_notebook(self):
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+    # =========================================================================
+    # BARRA DE NAVEGAÇÃO SEGMENTADA MODERNA (Substitui ttk.Notebook)
+    # =========================================================================
+    def _build_navbar(self):
+        nav_container = tk.Frame(self.root, bg=BG_MAIN, padx=20, pady=12)
+        nav_container.pack(fill=tk.X)
         
-        # Criação das Abas
-        self.tab_mice = tk.Frame(self.notebook, bg=BG_DARK, padx=12, pady=12)
-        self.tab_cursors = tk.Frame(self.notebook, bg=BG_DARK, padx=12, pady=12)
-        self.tab_system = tk.Frame(self.notebook, bg=BG_DARK, padx=12, pady=12)
-        self.tab_about = tk.Frame(self.notebook, bg=BG_DARK, padx=12, pady=12)
+        # Barra segmentada em cápsula escura
+        nav_bar = tk.Frame(nav_container, bg=BG_SURFACE, padx=4, pady=4, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        nav_bar.pack(fill=tk.X)
         
-        self.notebook.add(self.tab_mice, text=" 🏢 Áreas de Trabalho (Estações) ")
-        self.notebook.add(self.tab_cursors, text=" 🎨 Design dos Ponteiros ")
-        self.notebook.add(self.tab_system, text=" 🖥️ Monitores & Sistema ")
-        self.notebook.add(self.tab_about, text=" ℹ️ Sobre ")
+        nav_items = [
+            ("mice", "🏢  Áreas de Trabalho"),
+            ("cursors", "🎨  Design dos Ponteiros"),
+            ("system", "🖥️  Monitores & Sistema"),
+            ("about", "ℹ️  Sobre o Projeto")
+        ]
         
-        self._setup_tab_mice()
-        self._setup_tab_cursors()
-        self._setup_tab_system()
-        self._setup_tab_about()
+        for key, text in nav_items:
+            btn = tk.Button(
+                nav_bar, text=text, font=("Segoe UI", 9, "bold"),
+                fg=TEXT_SECONDARY, bg=BG_SURFACE, activebackground=BG_SURFACE_LIGHT,
+                activeforeground=TEXT_PRIMARY, relief=tk.FLAT, padx=16, pady=7,
+                cursor="hand2", command=lambda k=key: self.switch_tab(k)
+            )
+            btn.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
+            self.tab_buttons[key] = btn
 
-    def _setup_tab_mice(self):
-        # Banner explicativo da arquitetura de Lugares de Trabalho
-        top_banner = tk.Frame(self.tab_mice, bg="#131B2E", padx=14, pady=10, relief=tk.GROOVE, bd=1)
-        top_banner.pack(fill=tk.X, pady=(0, 10))
+    def switch_tab(self, tab_key: str):
+        """Alterna a aba de forma instantânea sem descarregar nem travar a interface."""
+        self.current_tab = tab_key
+        
+        # Atualiza estilo visual dos botões de navegação
+        for k, btn in self.tab_buttons.items():
+            if k == tab_key:
+                btn.config(bg=ACCENT_BLUE, fg="#FFFFFF")
+            else:
+                btn.config(bg=BG_SURFACE, fg=TEXT_SECONDARY)
+                
+        # Mostra o frame correspondente e oculta os demais
+        for k, frame in self.tabs.items():
+            if k == tab_key:
+                frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+            else:
+                frame.pack_forget()
+
+    # =========================================================================
+    # ÁREA DE CONTEÚDO (CONTAINERS DE CADA ABA)
+    # =========================================================================
+    def _build_content_area(self):
+        self.content_frame = tk.Frame(self.root, bg=BG_MAIN)
+        self.content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Cria frames para cada seção
+        self.tabs["mice"] = tk.Frame(self.content_frame, bg=BG_MAIN)
+        self.tabs["cursors"] = tk.Frame(self.content_frame, bg=BG_MAIN)
+        self.tabs["system"] = tk.Frame(self.content_frame, bg=BG_MAIN)
+        self.tabs["about"] = tk.Frame(self.content_frame, bg=BG_MAIN)
+        
+        self._setup_tab_mice(self.tabs["mice"])
+        self._setup_tab_cursors(self.tabs["cursors"])
+        self._setup_tab_system(self.tabs["system"])
+        self._setup_tab_about(self.tabs["about"])
+        
+        # Aba padrão inicial
+        self.switch_tab("mice")
+
+    # -------------------------------------------------------------------------
+    # ABA 1: ÁREAS DE TRABALHO (ESTAÇÕES A & B)
+    # -------------------------------------------------------------------------
+    def _setup_tab_mice(self, parent: tk.Frame):
+        # Banner informativo de topo
+        banner = tk.Frame(parent, bg=BG_SURFACE, padx=14, pady=10, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        banner.pack(fill=tk.X, pady=(0, 10))
         
         tk.Label(
-            top_banner,
-            text="🏢 Gerenciador de Áreas de Trabalho Independentes (Multi-Seat)",
-            font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg="#131B2E"
+            banner, text="🛡️ Arquitetura Multi-Seat Totalmente Isolada",
+            font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE
         ).pack(anchor="w")
         
         tk.Label(
-            top_banner,
-            text="Cada Área de Trabalho opera com seu monitor e mouse dedicado. Os cliques, movimentos e janelas de uma área NÃO bloqueiam e NUNCA interferem na outra.",
-            font=("Segoe UI", 8), fg=TEXT_MUTED, bg="#131B2E"
+            banner,
+            text="Cada Área de Trabalho opera com seu mouse e monitor dedicados. Cliques, arraste e foco de janelas de uma área não interferem e nunca bloqueiam a outra.",
+            font=("Segoe UI", 8), fg=TEXT_SECONDARY, bg=BG_SURFACE
         ).pack(anchor="w", pady=(2, 0))
 
-        # Container com 2 colunas para Área 1 e Área 2
-        cards_container = tk.Frame(self.tab_mice, bg=BG_DARK)
-        cards_container.pack(fill=tk.BOTH, expand=True)
-        cards_container.columnconfigure(0, weight=1)
-        cards_container.columnconfigure(1, weight=1)
+        # Grade com 2 Colunas para Lugar 1 e Lugar 2
+        cards_grid = tk.Frame(parent, bg=BG_MAIN)
+        cards_grid.pack(fill=tk.BOTH, expand=True)
+        cards_grid.columnconfigure(0, weight=1)
+        cards_grid.columnconfigure(1, weight=1)
         
-        # --- CARD ÁREA DE TRABALHO 1 (LUGAR 1) ---
-        card_m1 = tk.LabelFrame(
-            cards_container, text="  🏢 Área de Trabalho 1 (Lugar 1 - Estação A)  ",
-            bg=BG_CARD, fg=ACCENT_BLUE, font=("Segoe UI", 11, "bold"),
-            relief=tk.GROOVE, padx=14, pady=12
-        )
-        card_m1.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        # --- CARTÃO ÁREA 1 (LUGAR 1 - ESTAÇÃO A) ---
+        card_1 = tk.Frame(cards_grid, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        card_1.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         
-        tk.Label(card_m1, text="Dispositivo USB Dedicado (Hardware ID):", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 4))
-        self.cb_m1_device = ttk.Combobox(card_m1, state="readonly", font=("Segoe UI", 9))
-        self.cb_m1_device.pack(fill=tk.X, pady=(0, 6))
+        # Cabeçalho do Cartão 1 com acento Ciano
+        h1 = tk.Frame(card_1, bg=BG_SURFACE)
+        h1.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(h1, text="■", font=("Segoe UI", 11, "bold"), fg=ACCENT_CYAN, bg=BG_SURFACE).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(h1, text="Área de Trabalho 1 (Lugar 1 - Estação A)", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE).pack(side=tk.LEFT)
+        
+        # Seleção de Dispositivo
+        tk.Label(card_1, text="Mouse USB Dedicado (Hardware ID):", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(2, 3))
+        self.cb_m1_device = ttk.Combobox(card_1, state="readonly", font=("Segoe UI", 9))
+        self.cb_m1_device.pack(fill=tk.X, pady=(0, 5))
         self.cb_m1_device.bind("<<ComboboxSelected>>", self._on_m1_device_selected)
+        self._bind_combobox_topmost(self.cb_m1_device)
         
-        self.lbl_m1_hwid_detail = tk.Label(card_m1, text="HWID: --", font=("Consolas", 8), fg=TEXT_MUTED, bg=BG_CARD, wraplength=340, justify="left")
-        self.lbl_m1_hwid_detail.pack(anchor="w", pady=(0, 8))
+        # HWID Detalhe
+        self.lbl_m1_hwid_detail = tk.Label(
+            card_1, text="HWID: --", font=("Consolas", 8),
+            fg=ACCENT_CYAN, bg=BG_INSET, padx=8, pady=4, relief=tk.FLAT, anchor="w"
+        )
+        self.lbl_m1_hwid_detail.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(card_m1, text="Monitor Associado ao Lugar 1:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 2))
-        self.cb_m1_monitor = ttk.Combobox(card_m1, state="readonly", font=("Segoe UI", 9))
-        self.cb_m1_monitor.pack(fill=tk.X, pady=(0, 8))
+        # Seleção de Monitor
+        tk.Label(card_1, text="Monitor Associado ao Lugar 1:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(2, 3))
+        self.cb_m1_monitor = ttk.Combobox(card_1, state="readonly", font=("Segoe UI", 9))
+        self.cb_m1_monitor.pack(fill=tk.X, pady=(0, 10))
         self.cb_m1_monitor.bind("<<ComboboxSelected>>", self._on_m1_monitor_selected)
+        self._bind_combobox_topmost(self.cb_m1_monitor)
         
         # Sensibilidade
-        sens_box1 = tk.Frame(card_m1, bg=BG_CARD)
-        sens_box1.pack(fill=tk.X, pady=(2, 8))
-        tk.Label(sens_box1, text="Sensibilidade do Ponteiro:", font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
-        self.lbl_m1_sens_val = tk.Label(sens_box1, text="1.0x", font=("Segoe UI", 9, "bold"), fg=ACCENT_BLUE, bg=BG_CARD)
+        sens_row1 = tk.Frame(card_1, bg=BG_SURFACE)
+        sens_row1.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(sens_row1, text="Sensibilidade do Ponteiro:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(side=tk.LEFT)
+        self.lbl_m1_sens_val = tk.Label(sens_row1, text="1.0x", font=("Segoe UI", 8, "bold"), fg=ACCENT_CYAN, bg=BG_SURFACE)
         self.lbl_m1_sens_val.pack(side=tk.RIGHT)
         
-        self.scale_m1_sens = ttk.Scale(card_m1, from_=0.4, to=2.5, command=self._on_m1_sens_changed)
+        self.scale_m1_sens = ttk.Scale(card_1, from_=0.4, to=2.5, command=self._on_m1_sens_changed)
         self.scale_m1_sens.set(float(self.config.get("mouse1", {}).get("sensitivity", 1.0)))
-        self.scale_m1_sens.pack(fill=tk.X, pady=(0, 8))
+        self.scale_m1_sens.pack(fill=tk.X, pady=(0, 12))
         
-        # Painel de Monitoramento em Tempo Real do Lugar 1
-        mon_panel_1 = tk.Frame(card_m1, bg="#0F172A", padx=10, pady=8, relief=tk.SOLID, bd=1)
-        mon_panel_1.pack(fill=tk.X, pady=(6, 0))
+        # Telemetria em Tempo Real (Lugar 1)
+        telem_1 = tk.Frame(card_1, bg=BG_INSET, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        telem_1.pack(fill=tk.X, pady=(4, 0))
         
-        self.lbl_m1_pos = tk.Label(mon_panel_1, text="📍 Coordenadas: X: 0, Y: 0", font=("Segoe UI", 8, "bold"), fg=ACCENT_BLUE, bg="#0F172A")
+        self.lbl_m1_pos = tk.Label(telem_1, text="📍 Posição: X: 0  Y: 0", font=("Consolas", 8, "bold"), fg=ACCENT_CYAN, bg=BG_INSET)
         self.lbl_m1_pos.pack(anchor="w")
         
-        self.lbl_m1_window = tk.Label(mon_panel_1, text="🪟 Janela Ativa: Aguardando foco...", font=("Segoe UI", 8), fg=TEXT_PRIMARY, bg="#0F172A")
-        self.lbl_m1_window.pack(anchor="w", pady=(2, 2))
+        self.lbl_m1_window = tk.Label(telem_1, text="🪟 Janela: Aguardando foco...", font=("Segoe UI", 8), fg=TEXT_PRIMARY, bg=BG_INSET)
+        self.lbl_m1_window.pack(anchor="w", pady=(3, 3))
         
-        self.lbl_m1_active = tk.Label(mon_panel_1, text="● Lugar 1 Operando Isoladamente", font=("Segoe UI", 8), fg=ACCENT_GREEN, bg="#0F172A")
+        self.lbl_m1_active = tk.Label(telem_1, text="● Operando Isoladamente", font=("Segoe UI", 8, "bold"), fg=ACCENT_GREEN, bg=BG_INSET)
         self.lbl_m1_active.pack(anchor="w")
+
+        # --- CARTÃO ÁREA 2 (LUGAR 2 - ESTAÇÃO B) ---
+        card_2 = tk.Frame(cards_grid, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        card_2.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         
-        # --- CARD ÁREA DE TRABALHO 2 (LUGAR 2) ---
-        card_m2 = tk.LabelFrame(
-            cards_container, text="  🏢 Área de Trabalho 2 (Lugar 2 - Estação B)  ",
-            bg=BG_CARD, fg=ACCENT_ORANGE, font=("Segoe UI", 11, "bold"),
-            relief=tk.GROOVE, padx=14, pady=12
-        )
-        card_m2.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
+        # Cabeçalho do Cartão 2 com acento Laranja
+        h2 = tk.Frame(card_2, bg=BG_SURFACE)
+        h2.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(h2, text="■", font=("Segoe UI", 11, "bold"), fg=ACCENT_ORANGE, bg=BG_SURFACE).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(h2, text="Área de Trabalho 2 (Lugar 2 - Estação B)", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE).pack(side=tk.LEFT)
         
-        tk.Label(card_m2, text="Dispositivo USB Dedicado (Hardware ID):", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 4))
-        self.cb_m2_device = ttk.Combobox(card_m2, state="readonly", font=("Segoe UI", 9))
-        self.cb_m2_device.pack(fill=tk.X, pady=(0, 6))
+        # Seleção de Dispositivo
+        tk.Label(card_2, text="Mouse USB Dedicado (Hardware ID):", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(2, 3))
+        self.cb_m2_device = ttk.Combobox(card_2, state="readonly", font=("Segoe UI", 9))
+        self.cb_m2_device.pack(fill=tk.X, pady=(0, 5))
         self.cb_m2_device.bind("<<ComboboxSelected>>", self._on_m2_device_selected)
+        self._bind_combobox_topmost(self.cb_m2_device)
         
-        self.lbl_m2_hwid_detail = tk.Label(card_m2, text="HWID: --", font=("Consolas", 8), fg=TEXT_MUTED, bg=BG_CARD, wraplength=340, justify="left")
-        self.lbl_m2_hwid_detail.pack(anchor="w", pady=(0, 8))
+        # HWID Detalhe
+        self.lbl_m2_hwid_detail = tk.Label(
+            card_2, text="HWID: --", font=("Consolas", 8),
+            fg=ACCENT_ORANGE, bg=BG_INSET, padx=8, pady=4, relief=tk.FLAT, anchor="w"
+        )
+        self.lbl_m2_hwid_detail.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(card_m2, text="Monitor Associado ao Lugar 2:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(2, 2))
-        self.cb_m2_monitor = ttk.Combobox(card_m2, state="readonly", font=("Segoe UI", 9))
-        self.cb_m2_monitor.pack(fill=tk.X, pady=(0, 8))
+        # Seleção de Monitor
+        tk.Label(card_2, text="Monitor Associado ao Lugar 2:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(2, 3))
+        self.cb_m2_monitor = ttk.Combobox(card_2, state="readonly", font=("Segoe UI", 9))
+        self.cb_m2_monitor.pack(fill=tk.X, pady=(0, 10))
         self.cb_m2_monitor.bind("<<ComboboxSelected>>", self._on_m2_monitor_selected)
+        self._bind_combobox_topmost(self.cb_m2_monitor)
         
         # Sensibilidade
-        sens_box2 = tk.Frame(card_m2, bg=BG_CARD)
-        sens_box2.pack(fill=tk.X, pady=(2, 8))
-        tk.Label(sens_box2, text="Sensibilidade do Ponteiro:", font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
-        self.lbl_m2_sens_val = tk.Label(sens_box2, text="1.0x", font=("Segoe UI", 9, "bold"), fg=ACCENT_ORANGE, bg=BG_CARD)
+        sens_row2 = tk.Frame(card_2, bg=BG_SURFACE)
+        sens_row2.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(sens_row2, text="Sensibilidade do Ponteiro:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(side=tk.LEFT)
+        self.lbl_m2_sens_val = tk.Label(sens_row2, text="1.0x", font=("Segoe UI", 8, "bold"), fg=ACCENT_ORANGE, bg=BG_SURFACE)
         self.lbl_m2_sens_val.pack(side=tk.RIGHT)
         
-        self.scale_m2_sens = ttk.Scale(card_m2, from_=0.4, to=2.5, command=self._on_m2_sens_changed)
+        self.scale_m2_sens = ttk.Scale(card_2, from_=0.4, to=2.5, command=self._on_m2_sens_changed)
         self.scale_m2_sens.set(float(self.config.get("mouse2", {}).get("sensitivity", 1.0)))
-        self.scale_m2_sens.pack(fill=tk.X, pady=(0, 8))
+        self.scale_m2_sens.pack(fill=tk.X, pady=(0, 12))
         
-        # Painel de Monitoramento em Tempo Real do Lugar 2
-        mon_panel_2 = tk.Frame(card_m2, bg="#0F172A", padx=10, pady=8, relief=tk.SOLID, bd=1)
-        mon_panel_2.pack(fill=tk.X, pady=(6, 0))
+        # Telemetria em Tempo Real (Lugar 2)
+        telem_2 = tk.Frame(card_2, bg=BG_INSET, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        telem_2.pack(fill=tk.X, pady=(4, 0))
         
-        self.lbl_m2_pos = tk.Label(mon_panel_2, text="📍 Coordenadas: X: 0, Y: 0", font=("Segoe UI", 8, "bold"), fg=ACCENT_ORANGE, bg="#0F172A")
+        self.lbl_m2_pos = tk.Label(telem_2, text="📍 Posição: X: 0  Y: 0", font=("Consolas", 8, "bold"), fg=ACCENT_ORANGE, bg=BG_INSET)
         self.lbl_m2_pos.pack(anchor="w")
         
-        self.lbl_m2_window = tk.Label(mon_panel_2, text="🪟 Janela Ativa: Aguardando foco...", font=("Segoe UI", 8), fg=TEXT_PRIMARY, bg="#0F172A")
-        self.lbl_m2_window.pack(anchor="w", pady=(2, 2))
+        self.lbl_m2_window = tk.Label(telem_2, text="🪟 Janela: Aguardando foco...", font=("Segoe UI", 8), fg=TEXT_PRIMARY, bg=BG_INSET)
+        self.lbl_m2_window.pack(anchor="w", pady=(3, 3))
         
-        self.lbl_m2_active = tk.Label(mon_panel_2, text="● Lugar 2 Operando Isoladamente", font=("Segoe UI", 8), fg=ACCENT_GREEN, bg="#0F172A")
+        self.lbl_m2_active = tk.Label(telem_2, text="● Operando Isoladamente", font=("Segoe UI", 8, "bold"), fg=ACCENT_GREEN, bg=BG_INSET)
         self.lbl_m2_active.pack(anchor="w")
 
-        # Barra inferior de ações
-        action_bar = tk.Frame(self.tab_mice, bg=BG_DARK)
+        # Barra de Ações Inferior
+        action_bar = tk.Frame(parent, bg=BG_MAIN)
         action_bar.pack(fill=tk.X, pady=(12, 0))
         
         btn_refresh = tk.Button(
-            action_bar, text="🔄 Redetectar Mouses e Portas USB",
-            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD,
-            activebackground=BG_HOVER, relief=tk.FLAT, padx=12, pady=6,
-            command=self.refresh_devices
+            action_bar, text="🔄 Redetectar Mouses & Portas USB",
+            font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE,
+            activebackground=BG_SURFACE_LIGHT, relief=tk.FLAT, padx=14, pady=7,
+            cursor="hand2", command=self.refresh_devices
         )
         btn_refresh.pack(side=tk.LEFT)
-        
-        lbl_policy = tk.Label(
-            action_bar,
-            text="🛡️ Modo Multiseat Ativo: Cliques e janelas não se bloqueiam nem se cancelam.",
-            font=("Segoe UI", 8, "bold"), fg=ACCENT_GREEN, bg=BG_DARK
-        )
-        lbl_policy.pack(side=tk.RIGHT, padx=10)
 
-    def _setup_tab_cursors(self):
-        # Seletor do mouse a configurar (Mouse 1 / Mouse 2)
-        top_sel = tk.Frame(self.tab_cursors, bg=BG_DARK)
-        top_sel.pack(fill=tk.X, pady=(0, 12))
+    # -------------------------------------------------------------------------
+    # ABA 2: DESIGN DOS PONTEIROS
+    # -------------------------------------------------------------------------
+    def _setup_tab_cursors(self, parent: tk.Frame):
+        # Seletor do mouse a customizar (Segmented Pill Switch)
+        top_sel_box = tk.Frame(parent, bg=BG_SURFACE, padx=14, pady=10, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        top_sel_box.pack(fill=tk.X, pady=(0, 12))
         
-        tk.Label(top_sel, text="Personalizar Design do Cursor para:", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_DARK).pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(top_sel_box, text="Personalizar Ponteiro para:", font=("Segoe UI", 9, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(side=tk.LEFT, padx=(0, 12))
         
         self.cursor_target_var = tk.StringVar(value="mouse1")
-        rb1 = tk.Radiobutton(
-            top_sel, text="Mouse 1 (Primário)", variable=self.cursor_target_var, value="mouse1",
-            font=("Segoe UI", 9, "bold"), fg=ACCENT_BLUE, bg=BG_DARK, selectcolor=BG_CARD,
-            activebackground=BG_DARK, activeforeground=ACCENT_BLUE,
-            command=self._on_cursor_target_changed
-        )
-        rb1.pack(side=tk.LEFT, padx=6)
         
-        rb2 = tk.Radiobutton(
-            top_sel, text="Mouse 2 (Secundário)", variable=self.cursor_target_var, value="mouse2",
-            font=("Segoe UI", 9, "bold"), fg=ACCENT_ORANGE, bg=BG_DARK, selectcolor=BG_CARD,
-            activebackground=BG_DARK, activeforeground=ACCENT_ORANGE,
-            command=self._on_cursor_target_changed
+        self.btn_target_m1 = tk.Button(
+            top_sel_box, text="🖱️ Mouse 1 (Primário)", font=("Segoe UI", 9, "bold"),
+            fg="#FFFFFF", bg=ACCENT_BLUE, relief=tk.FLAT, padx=14, pady=5,
+            cursor="hand2", command=lambda: self._select_cursor_target("mouse1")
         )
-        rb2.pack(side=tk.LEFT, padx=6)
+        self.btn_target_m1.pack(side=tk.LEFT, padx=4)
+        
+        self.btn_target_m2 = tk.Button(
+            top_sel_box, text="🖱️ Mouse 2 (Secundário)", font=("Segoe UI", 9, "bold"),
+            fg=TEXT_SECONDARY, bg=BG_INSET, relief=tk.FLAT, padx=14, pady=5,
+            cursor="hand2", command=lambda: self._select_cursor_target("mouse2")
+        )
+        self.btn_target_m2.pack(side=tk.LEFT, padx=4)
 
         # Layout dividido: Lado esquerdo configurações, Lado direito Pré-visualização
-        split_frame = tk.Frame(self.tab_cursors, bg=BG_DARK)
+        split_frame = tk.Frame(parent, bg=BG_MAIN)
         split_frame.pack(fill=tk.BOTH, expand=True)
         split_frame.columnconfigure(0, weight=3)
         split_frame.columnconfigure(1, weight=2)
         
-        # Painel de Opções (Esquerda)
-        opts_card = tk.LabelFrame(
-            split_frame, text="  Estilo e Propriedades  ",
-            bg=BG_CARD, fg=TEXT_PRIMARY, font=("Segoe UI", 10, "bold"),
-            padx=16, pady=12, relief=tk.GROOVE
-        )
-        opts_card.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        # Painel Esquerdo: Propriedades e Estilo
+        opts_card = tk.Frame(split_frame, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        opts_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         
         # Formato do ponteiro
-        tk.Label(opts_card, text="Formato do Ponteiro:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(4, 2))
-        self.shape_var = tk.StringVar(value="sleek")
+        tk.Label(opts_card, text="Formato do Ponteiro:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(0, 3))
         shape_names = [
             ("Seta Minimalista Sleek (Moderna)", "sleek"),
             ("Seta Aerodinâmica Fluent (Win 11)", "fluent"),
@@ -345,314 +488,345 @@ class DualPointerApp:
             ("Caneta Stylus Designer", "stylus")
         ]
         self.cb_shape = ttk.Combobox(opts_card, state="readonly", values=[s[0] for s in shape_names], font=("Segoe UI", 9))
-        self.cb_shape.pack(fill=tk.X, pady=(0, 10))
+        self.cb_shape.pack(fill=tk.X, pady=(0, 12))
         self.shape_name_map = {s[0]: s[1] for s in shape_names}
         self.shape_rev_map = {s[1]: s[0] for s in shape_names}
-        # Compatibilidade com formatos legados
         self.shape_rev_map["arrow"] = "Seta Minimalista Sleek (Moderna)"
         self.shape_rev_map["crosshair"] = "Mira de Precisão (Crosshair Pro)"
         self.shape_rev_map["dot"] = "Ponto Halo Neon (Capsule)"
         self.cb_shape.bind("<<ComboboxSelected>>", self._on_cursor_prop_changed)
+        self._bind_combobox_topmost(self.cb_shape)
 
         # Cor do Ponteiro
-        tk.Label(opts_card, text="Cor do Ponteiro:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(anchor="w", pady=(4, 2))
-        palette_frame = tk.Frame(opts_card, bg=BG_CARD)
-        palette_frame.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(opts_card, text="Cor do Ponteiro:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(0, 4))
+        pal_frame = tk.Frame(opts_card, bg=BG_SURFACE)
+        pal_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.color_preview_btn = tk.Button(
-            palette_frame, text="   ", bg="#00D2FF", relief=tk.SOLID, bd=1,
-            command=self._pick_custom_color, cursor="hand2"
+            pal_frame, text="   ", bg="#38BDF8", relief=tk.SOLID, bd=1,
+            command=self._pick_custom_color, cursor="hand2", padx=6
         )
         self.color_preview_btn.pack(side=tk.LEFT, padx=(0, 8))
         
         for hex_code, name in PALETTE_PRESETS:
             b = tk.Button(
-                palette_frame, bg=hex_code, relief=tk.FLAT, bd=0, width=2, height=1,
+                pal_frame, bg=hex_code, relief=tk.FLAT, bd=0, width=2, height=1,
                 cursor="hand2", command=lambda c=hex_code: self._set_cursor_color(c)
             )
             b.pack(side=tk.LEFT, padx=2)
             
-        btn_custom_col = tk.Button(
-            palette_frame, text="Mais Cores...", font=("Segoe UI", 8),
-            fg=TEXT_PRIMARY, bg=BG_HOVER, relief=tk.FLAT, padx=6,
+        btn_custom = tk.Button(
+            pal_frame, text="Mais Cores...", font=("Segoe UI", 8, "bold"),
+            fg=TEXT_PRIMARY, bg=BG_SURFACE_LIGHT, relief=tk.FLAT, padx=8, pady=2,
             command=self._pick_custom_color, cursor="hand2"
         )
-        btn_custom_col.pack(side=tk.LEFT, padx=6)
+        btn_custom.pack(side=tk.LEFT, padx=6)
         
         # Tamanho do Ponteiro
-        size_box = tk.Frame(opts_card, bg=BG_CARD)
-        size_box.pack(fill=tk.X, pady=(6, 2))
-        tk.Label(size_box, text="Tamanho do Cursor:", font=("Segoe UI", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side=tk.LEFT)
-        self.lbl_size_val = tk.Label(size_box, text="28px", font=("Segoe UI", 9, "bold"), fg=ACCENT_BLUE, bg=BG_CARD)
+        size_box = tk.Frame(opts_card, bg=BG_SURFACE)
+        size_box.pack(fill=tk.X, pady=(4, 2))
+        tk.Label(size_box, text="Tamanho do Cursor:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(side=tk.LEFT)
+        self.lbl_size_val = tk.Label(size_box, text="28px", font=("Segoe UI", 8, "bold"), fg=ACCENT_CYAN, bg=BG_SURFACE)
         self.lbl_size_val.pack(side=tk.RIGHT)
         
         self.scale_cursor_size = ttk.Scale(opts_card, from_=18, to=54, command=self._on_cursor_size_scale)
-        self.scale_cursor_size.pack(fill=tk.X, pady=(0, 10))
+        self.scale_cursor_size.pack(fill=tk.X, pady=(0, 12))
         
         # Checkboxes Efeito Glow e Rótulo
         self.chk_glow_var = tk.BooleanVar(value=True)
-        chk_glow = ttk.Checkbutton(opts_card, text="Aura Luminosa (Glow) para Alta Visibilidade", variable=self.chk_glow_var, command=self._on_cursor_prop_changed)
+        chk_glow = ttk.Checkbutton(
+            opts_card, text="Aura Luminosa (Glow Neon para Alto Contraste)",
+            variable=self.chk_glow_var, command=self._on_cursor_prop_changed
+        )
         chk_glow.pack(anchor="w", pady=4)
         
         self.chk_label_var = tk.BooleanVar(value=True)
-        chk_label = ttk.Checkbutton(opts_card, text="Exibir Etiqueta de Identificação (M1 / M2)", variable=self.chk_label_var, command=self._on_cursor_prop_changed)
-        chk_label.pack(anchor="w", pady=4)
-        
-        # Painel de Pré-visualização Interativo (Direita)
-        preview_card = tk.LabelFrame(
-            split_frame, text="  Pré-visualização em Tempo Real  ",
-            bg=BG_CARD, fg=TEXT_PRIMARY, font=("Segoe UI", 10, "bold"),
-            padx=14, pady=12, relief=tk.GROOVE
+        chk_label = ttk.Checkbutton(
+            opts_card, text="Exibir Etiqueta de Identificação do Mouse (1 / 2)",
+            variable=self.chk_label_var, command=self._on_cursor_prop_changed
         )
-        preview_card.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
+        chk_label.pack(anchor="w", pady=4)
+
+        # Painel Direito: Pré-visualização Interativa em Canvas
+        preview_card = tk.Frame(split_frame, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        preview_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         
-        self.preview_canvas = tk.Canvas(preview_card, bg="#0A0E17", highlightthickness=1, highlightbackground=BORDER_COLOR)
-        self.preview_canvas.pack(fill=tk.BOTH, expand=True, pady=6)
+        tk.Label(preview_card, text="Pré-visualização em Tempo Real:", font=("Segoe UI", 8, "bold"), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(0, 6))
+        
+        self.preview_canvas = tk.Canvas(preview_card, bg=BG_INSET, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        self.preview_canvas.pack(fill=tk.BOTH, expand=True, pady=4)
         
         tk.Label(
-            preview_card, text="Passe o mouse sobre a área acima para testar o movimento visual do cursor.",
-            font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_CARD, wraplength=220, justify="center"
+            preview_card, text="Mova o ponteiro dentro da grade acima para testar o visual e movimento.",
+            font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_SURFACE, wraplength=220, justify="center"
         ).pack(pady=(4, 0))
         
         self.preview_canvas.bind("<Motion>", self._on_canvas_motion)
         self._load_cursor_form("mouse1")
 
-    def _setup_tab_system(self):
-        # Card Inicialização com o Windows
-        card_start = tk.LabelFrame(
-            self.tab_system, text="  Inicialização com o Windows  ",
-            bg=BG_CARD, fg=TEXT_PRIMARY, font=("Segoe UI", 10, "bold"),
-            padx=16, pady=14, relief=tk.GROOVE
-        )
-        card_start.pack(fill=tk.X, padx=6, pady=6)
+    def _select_cursor_target(self, target: str):
+        self.cursor_target_var.set(target)
+        if target == "mouse1":
+            self.btn_target_m1.config(bg=ACCENT_BLUE, fg="#FFFFFF")
+            self.btn_target_m2.config(bg=BG_INSET, fg=TEXT_SECONDARY)
+        else:
+            self.btn_target_m1.config(bg=BG_INSET, fg=TEXT_SECONDARY)
+            self.btn_target_m2.config(bg=ACCENT_BLUE, fg="#FFFFFF")
+        self._load_cursor_form(target)
+
+    # -------------------------------------------------------------------------
+    # ABA 3: MONITORES & SISTEMA
+    # -------------------------------------------------------------------------
+    def _setup_tab_system(self, parent: tk.Frame):
+        # Card 1: Inicialização com o Windows
+        card_start = tk.Frame(parent, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        card_start.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(card_start, text="Inicialização Automática com o Windows", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE).pack(anchor="w")
+        tk.Label(card_start, text="Permite que o DualPointer Pro inicie automaticamente junto com o sistema operacional.", font=("Segoe UI", 8), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(2, 8))
         
         self.chk_autostart_var = tk.BooleanVar(value=is_startup_enabled())
         chk_autostart = ttk.Checkbutton(
-            card_start, text="Iniciar o DualPointer Pro automaticamente junto com o Windows",
+            card_start, text="Iniciar automaticamente ao ligar o computador (pasta Inicializar)",
             variable=self.chk_autostart_var, command=self._on_autostart_toggled
         )
-        chk_autostart.pack(anchor="w", pady=(2, 6))
-        
-        self.lbl_autostart_path = tk.Label(
-            card_start,
-            text=f"Atalho na pasta: %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
-            font=("Consolas", 8), fg=TEXT_MUTED, bg=BG_CARD
-        )
-        self.lbl_autostart_path.pack(anchor="w")
+        chk_autostart.pack(anchor="w")
 
-        # Card Visibilidade do Cursor Nativo do Windows
-        card_vis = tk.LabelFrame(
-            self.tab_system, text="  Visibilidade do Cursor do Windows  ",
-            bg=BG_CARD, fg=TEXT_PRIMARY, font=("Segoe UI", 10, "bold"),
-            padx=16, pady=12, relief=tk.GROOVE
-        )
-        card_vis.pack(fill=tk.X, padx=6, pady=6)
+        # Card 2: Visibilidade do Cursor Nativo
+        card_hide = tk.Frame(parent, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        card_hide.pack(fill=tk.X, pady=(0, 10))
         
-        self.chk_hide_os_var = tk.BooleanVar(value=self.config.get("system", {}).get("hide_os_cursor", True))
-        chk_hide_os = ttk.Checkbutton(
-            card_vis, text="Ocultar ponteiro padrão do Windows (evita que a seta branca nativa fique por cima do cursor do app)",
-            variable=self.chk_hide_os_var, command=self._on_hide_os_cursor_toggled
+        tk.Label(card_hide, text="Visibilidade do Cursor Padrão do Windows", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE).pack(anchor="w")
+        tk.Label(card_hide, text="Substitui o cursor único do sistema para que apenas os 2 ponteiros independentes sejam visíveis.", font=("Segoe UI", 8), fg=TEXT_SECONDARY, bg=BG_SURFACE).pack(anchor="w", pady=(2, 8))
+        
+        self.chk_hide_cursor_var = tk.BooleanVar(value=self.config.get("system", {}).get("hide_os_cursor", True))
+        chk_hide = ttk.Checkbutton(
+            card_hide, text="Ocultar ponteiro nativo do Windows enquanto o motor estiver ativo (Recomendado)",
+            variable=self.chk_hide_cursor_var, command=self._on_hide_cursor_toggled
         )
-        chk_hide_os.pack(anchor="w", pady=(2, 4))
-        tk.Label(
-            card_vis, text="Mantém visíveis exclusivamente os seus ponteiros personalizados com cores, glow e etiquetas.",
-            font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_CARD
-        ).pack(anchor="w")
+        chk_hide.pack(anchor="w")
 
-        # Card Monitores Conectados
-        card_mon = tk.LabelFrame(
-            self.tab_system, text="  Monitores Detectados no Computador  ",
-            bg=BG_CARD, fg=TEXT_PRIMARY, font=("Segoe UI", 10, "bold"),
-            padx=16, pady=14, relief=tk.GROOVE
-        )
-        card_mon.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        # Card 3: Monitores Detectados
+        card_mon = tk.Frame(parent, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        card_mon.pack(fill=tk.X, pady=(0, 10))
         
-        self.monitors_listbox_frame = tk.Frame(card_mon, bg=BG_CARD)
-        self.monitors_listbox_frame.pack(fill=tk.BOTH, expand=True)
+        tk.Label(card_mon, text="Monitores Detectados no Computador", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE).pack(anchor="w")
+        self.lbl_mon_summary = tk.Label(card_mon, text="Detectando telas ativas...", font=("Segoe UI", 8), fg=ACCENT_CYAN, bg=BG_SURFACE)
+        self.lbl_mon_summary.pack(anchor="w", pady=(4, 0))
+
+        # Card 4: Simulação para Testes com 1 Mouse
+        card_sim = tk.Frame(parent, bg=BG_SURFACE, padx=16, pady=14, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        card_sim.pack(fill=tk.X)
         
-        # Card Modo de Simulação / Teste
-        card_sim = tk.LabelFrame(
-            self.tab_system, text="  Modo de Simulação & Demonstração  ",
-            bg=BG_CARD, fg=ACCENT_ORANGE, font=("Segoe UI", 10, "bold"),
-            padx=16, pady=12, relief=tk.GROOVE
-        )
-        card_sim.pack(fill=tk.X, padx=6, pady=6)
-        
+        tk.Label(card_sim, text="Modo de Simulação & Demonstração", font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE).pack(anchor="w")
         self.chk_sim_var = tk.BooleanVar(value=self.config.get("system", {}).get("simulation_mode", False))
         chk_sim = ttk.Checkbutton(
-            card_sim, text="Ativar Modo de Simulação (move o Mouse 2 automaticamente para testes com 1 mouse físico)",
+            card_sim, text="Ativar Modo de Simulação (move o Mouse 2 em espelho para testar com apenas 1 mouse físico conectado)",
             variable=self.chk_sim_var, command=self._on_sim_mode_toggled
         )
-        chk_sim.pack(anchor="w")
+        chk_sim.pack(anchor="w", pady=(6, 0))
 
-    def _setup_tab_about(self):
-        about_card = tk.LabelFrame(
-            self.tab_about, text="  Informações do Desenvolvedor e Software  ",
-            bg=BG_CARD, fg=ACCENT_BLUE, font=("Segoe UI", 11, "bold"),
-            padx=24, pady=20, relief=tk.GROOVE
-        )
-        about_card.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+    # -------------------------------------------------------------------------
+    # ABA 4: SOBRE O PROJETO (MODERNA & ELEGANTE)
+    # -------------------------------------------------------------------------
+    def _setup_tab_about(self, parent: tk.Frame):
+        about_card = tk.Frame(parent, bg=BG_SURFACE, padx=24, pady=24, highlightthickness=1, highlightbackground=BORDER_SUBTLE)
+        about_card.pack(fill=tk.BOTH, expand=True)
         
-        # Logo simbólico
-        tk.Label(
-            about_card, text="🖱️⚡🖥️",
-            font=("Segoe UI", 32), bg=BG_CARD
-        ).pack(pady=(6, 2))
+        # Emblema / Monograma do Desenvolvedor
+        badge_frame = tk.Frame(about_card, bg=BG_SURFACE)
+        badge_frame.pack(pady=(4, 8))
         
         tk.Label(
-            about_card, text="DualPointer Pro",
-            font=("Segoe UI", 18, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD
+            badge_frame, text="⚡",
+            font=("Segoe UI", 32), fg=ACCENT_CYAN, bg=BG_SURFACE
         ).pack()
         
         tk.Label(
-            about_card, text="Versão 1.0.0 Pro • Windows 10/11 x64",
-            font=("Segoe UI", 9), fg=TEXT_MUTED, bg=BG_CARD
-        ).pack(pady=(0, 16))
+            about_card, text="DualPointer Pro",
+            font=("Segoe UI", 18, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE
+        ).pack()
         
-        # Linha divisória
-        tk.Frame(about_card, height=1, bg=BORDER_COLOR).pack(fill=tk.X, pady=8)
+        tk.Label(
+            about_card, text="Versão 1.1 Multi-Seat Pro • Windows 10/11 x64",
+            font=("Segoe UI", 9), fg=TEXT_SECONDARY, bg=BG_SURFACE
+        ).pack(pady=(1, 14))
         
-        # Bloco com o nome e github
-        dev_frame = tk.Frame(about_card, bg=BG_CARD)
-        dev_frame.pack(pady=12)
+        # Linha Divisória
+        tk.Frame(about_card, height=1, bg=BORDER_SUBTLE).pack(fill=tk.X, pady=8)
+        
+        # Bloco de Créditos com Destaque
+        dev_frame = tk.Frame(about_card, bg=BG_SURFACE)
+        dev_frame.pack(pady=10)
         
         tk.Label(
             dev_frame, text="Desenvolvido por:",
-            font=("Segoe UI", 10), fg=TEXT_MUTED, bg=BG_CARD
+            font=("Segoe UI", 9), fg=TEXT_SECONDARY, bg=BG_SURFACE
         ).pack()
         
         tk.Label(
             dev_frame, text="Caio Monteiro",
-            font=("Segoe UI", 16, "bold"), fg=ACCENT_BLUE, bg=BG_CARD
+            font=("Segoe UI", 16, "bold"), fg=ACCENT_CYAN, bg=BG_SURFACE
         ).pack(pady=2)
         
-        # Botão GitHub
+        # Botão GitHub (Abertura 100% assíncrona para não travar a GUI)
         github_btn = tk.Button(
-            dev_frame, text="🐙 GitHub: chacalbl4ck",
-            font=("Segoe UI", 10, "bold"), fg="#FFFFFF", bg="#24292F",
-            activebackground="#1B1F23", activeforeground=ACCENT_BLUE,
-            relief=tk.FLAT, padx=16, pady=8, cursor="hand2",
-            command=lambda: webbrowser.open("https://github.com/chacalbl4ck")
+            dev_frame, text="🐙  GitHub: chacalbl4ck",
+            font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg="#1E293B",
+            activebackground="#0F172A", activeforeground=ACCENT_CYAN,
+            relief=tk.FLAT, padx=18, pady=8, cursor="hand2",
+            command=self._open_github_async
         )
         github_btn.pack(pady=8)
         
         desc_text = (
-            "Software de alta performance para permitir a conexão e utilização simultânea "
-            "e independente de dois mouses em computadores com múltiplos monitores.\n\n"
-            "• Identificação direta por USB Hardware ID (VID & PID)\n"
-            "• Suporte e delimitação de telas por monitor\n"
-            "• Personalização completa da forma, cor e tamanho do ponteiro\n"
-            "• Supressão de conflitos via Low-Level Hook e Windows Raw Input API\n"
-            "• Inicialização automática integrada com o Windows"
+            "Software de alta performance projetado para permitir a conexão e utilização simultânea "
+            "e totalmente independente de múltiplos mouses em computadores com vários monitores.\n\n"
+            "• Roteamento físico direto por USB Hardware ID (VID & PID)\n"
+            "• Delimitação independente de limites e telas por monitor\n"
+            "• Supressão de interferências via Low-Level Hook e Windows Raw Input API\n"
+            "• Design de ponteiros ultra-modernos com tecnologia Pillow e tipografia Segoe UI\n"
+            "• Inicialização automática nativa integrada ao Windows"
         )
         tk.Label(
             about_card, text=desc_text,
-            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_CARD,
-            justify="center", wraplength=550
-        ).pack(pady=14)
+            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_SURFACE,
+            justify="center", wraplength=580
+        ).pack(pady=12)
 
+    def _open_github_async(self):
+        """Abre o link do GitHub de forma assíncrona para não travar o processo."""
+        threading.Thread(
+            target=webbrowser.open,
+            args=("https://github.com/chacalbl4ck",),
+            daemon=True
+        ).start()
+
+    # =========================================================================
+    # FOOTER BAR
+    # =========================================================================
     def _build_footer(self):
-        footer = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=20)
+        footer = tk.Frame(self.root, bg=BG_MAIN, pady=8, padx=20)
         footer.pack(fill=tk.X)
         
         self.btn_save = tk.Button(
-            footer, text="💾 Salvar Configurações",
-            font=("Segoe UI", 10, "bold"), fg="#FFFFFF", bg="#0284C7",
-            activebackground="#0369A1", relief=tk.FLAT, padx=16, pady=7,
+            footer, text="💾  Salvar e Aplicar Configurações",
+            font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg=ACCENT_BLUE,
+            activebackground="#0369A1", relief=tk.FLAT, padx=18, pady=8,
             cursor="hand2", command=self.save_and_apply
         )
         self.btn_save.pack(side=tk.RIGHT)
 
         lbl_failsafe = tk.Label(
-            footer, text="Atalho de Emergência para Pausar/Ativar: F12 ou Botão Mestre",
-            font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_DARK
+            footer, text="Atalho Global de Emergência: F12 (Pausar / Retomar)",
+            font=("Segoe UI", 8), fg=TEXT_MUTED, bg=BG_MAIN
         )
         lbl_failsafe.pack(side=tk.LEFT)
 
-    # --- LÓGICA DE ATUALIZAÇÃO E EVENTOS ---
+    # =========================================================================
+    # LOOP DE TELEMETRIA A 30 FPS (RODA 100% NA THREAD DA GUI)
+    # =========================================================================
+    def _start_telemetry_loop(self):
+        self._update_telemetry()
 
+    def _update_telemetry(self):
+        """
+        Atualiza posições, janela ativa e atividade a 30 FPS sem chamadas entre threads.
+        Se a aba atual não for 'mice', nenhuma label é tocada, prevenindo deadlocks.
+        """
+        try:
+            if not self.root.winfo_exists():
+                return
+            
+            if self.current_tab == "mice":
+                x1, y1 = self.engine.pos1
+                x2, y2 = self.engine.pos2
+                
+                self.lbl_m1_pos.config(text=f"📍 Posição: X: {int(x1)}  Y: {int(y1)}")
+                self.lbl_m2_pos.config(text=f"📍 Posição: X: {int(x2)}  Y: {int(y2)}")
+                
+                # Atualização suave de títulos de janelas
+                t1 = self.engine.active_wnd_m1_title
+                t2 = self.engine.active_wnd_m2_title
+                c1 = (t1[:30] + '...') if len(t1) > 32 else (t1 or "Área de Trabalho / Desktop")
+                c2 = (t2[:30] + '...') if len(t2) > 32 else (t2 or "Área de Trabalho / Desktop")
+                self.lbl_m1_window.config(text=f"🪟 Janela: {c1}")
+                self.lbl_m2_window.config(text=f"🪟 Janela: {c2}")
+                
+                # Indicador de atividade recente (< 0.35s)
+                now = time.time()
+                if (now - self.engine.m1_last_activity) < 0.35:
+                    self.lbl_m1_active.config(text="● Clicando / Movendo...", fg=ACCENT_CYAN)
+                else:
+                    self.lbl_m1_active.config(text="● Operando Isoladamente", fg=ACCENT_GREEN)
+                    
+                if (now - self.engine.m2_last_activity) < 0.35:
+                    self.lbl_m2_active.config(text="● Clicando / Movendo...", fg=ACCENT_ORANGE)
+                else:
+                    self.lbl_m2_active.config(text="● Operando Isoladamente", fg=ACCENT_GREEN)
+        except Exception:
+            pass
+        finally:
+            self.root.after(33, self._update_telemetry)
+
+    # =========================================================================
+    # LÓGICA DE DADOS, DISPOSITIVOS E CONFIGURAÇÕES
+    # =========================================================================
     def refresh_devices(self):
-        """Busca mouses conectados e atualiza os dropdowns."""
         self.connected_mice = get_connected_mice()
         labels = [m['display_label'] for m in self.connected_mice]
         
         self.cb_m1_device['values'] = labels
         self.cb_m2_device['values'] = labels
         
-        # Seleciona Mouse 1 com base no config
         m1_hwid = self.config.get("mouse1", {}).get("hwid", "")
-        sel_idx_1 = 0
+        sel_1 = 0
         for i, m in enumerate(self.connected_mice):
             if m1_hwid and m1_hwid in m['hwid']:
-                sel_idx_1 = i
+                sel_1 = i
                 break
         if labels:
-            self.cb_m1_device.current(sel_idx_1)
-            self._update_m1_hwid_label(self.connected_mice[sel_idx_1])
+            self.cb_m1_device.current(sel_1)
+            self._update_m1_hwid_label(self.connected_mice[sel_1])
             
-        # Seleciona Mouse 2
         m2_hwid = self.config.get("mouse2", {}).get("hwid", "")
-        sel_idx_2 = 1 if len(labels) > 1 else 0
+        sel_2 = 1 if len(labels) > 1 else 0
         for i, m in enumerate(self.connected_mice):
             if m2_hwid and m2_hwid in m['hwid']:
-                sel_idx_2 = i
+                sel_2 = i
                 break
         if labels:
-            self.cb_m2_device.current(sel_idx_2)
-            self._update_m2_hwid_label(self.connected_mice[sel_idx_2])
+            self.cb_m2_device.current(sel_2)
+            self._update_m2_hwid_label(self.connected_mice[sel_2])
 
     def refresh_monitors(self):
-        """Busca monitores conectados e atualiza os dropdowns e a lista visual."""
         self.connected_monitors = get_monitors()
-        mon_options = ["Todos os Monitores"] + [m['label'] for m in self.connected_monitors]
+        labels = ["Todos os Monitores (Área Global)"]
+        for m in self.connected_monitors:
+            prim = " [Principal]" if m.get('primary', False) else ""
+            labels.append(f"Monitor {m['index']}: {m['width']}x{m['height']}{prim}")
+            
+        self.cb_m1_monitor['values'] = labels
+        self.cb_m2_monitor['values'] = labels
         
-        self.cb_m1_monitor['values'] = mon_options
-        self.cb_m2_monitor['values'] = mon_options
-        
-        # Seleção Mouse 1
         m1_mons = self.config.get("mouse1", {}).get("monitors", [1])
-        if 0 in m1_mons or not m1_mons:
-            self.cb_m1_monitor.current(0)
-        else:
-            idx = m1_mons[0]
-            self.cb_m1_monitor.current(idx if idx <= len(self.connected_monitors) else 0)
+        idx1 = m1_mons[0] if m1_mons and m1_mons[0] < len(labels) else 1
+        if labels:
+            self.cb_m1_monitor.current(min(idx1, len(labels) - 1))
             
-        # Seleção Mouse 2
         m2_mons = self.config.get("mouse2", {}).get("monitors", [2])
-        if 0 in m2_mons or not m2_mons:
-            self.cb_m2_monitor.current(0)
-        else:
-            idx = m2_mons[0]
-            self.cb_m2_monitor.current(idx if idx <= len(self.connected_monitors) else 0)
-
-        # Atualiza a exibição de monitores na aba Sistema
-        for widget in self.monitors_listbox_frame.winfo_children():
-            widget.destroy()
+        idx2 = m2_mons[0] if m2_mons and m2_mons[0] < len(labels) else (2 if len(labels) > 2 else 1)
+        if labels:
+            self.cb_m2_monitor.current(min(idx2, len(labels) - 1))
             
-        for mon in self.connected_monitors:
-            row = tk.Frame(self.monitors_listbox_frame, bg=BG_DARK, pady=8, padx=10)
-            row.pack(fill=tk.X, pady=3)
-            
-            p_badge = " [PRINCIPAL]" if mon['primary'] else ""
-            tk.Label(
-                row, text=f"🖥️ {mon['label']}",
-                font=("Segoe UI", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_DARK
-            ).pack(side=tk.LEFT)
-            
-            tk.Label(
-                row, text=f"Posição: ({mon['left']}, {mon['top']}) até ({mon['right']}, {mon['bottom']})",
-                font=("Consolas", 8), fg=TEXT_MUTED, bg=BG_DARK
-            ).pack(side=tk.RIGHT)
+        summary = f"{len(self.connected_monitors)} tela(s) ativa(s): " + " • ".join([f"M{m['index']} ({m['width']}x{m['height']})" for m in self.connected_monitors])
+        self.lbl_mon_summary.config(text=summary)
 
     def _update_m1_hwid_label(self, dev: Dict):
-        hwid = dev.get('hwid', '')
-        inst = dev.get('instance_id', '')
-        self.lbl_m1_hwid_detail.config(text=f"Hardware ID: {hwid} | Instância: {inst}")
+        self.lbl_m1_hwid_detail.config(text=f"HWID: {dev['hwid']}  |  {dev['friendly_name']}")
 
     def _update_m2_hwid_label(self, dev: Dict):
-        hwid = dev.get('hwid', '')
-        inst = dev.get('instance_id', '')
-        self.lbl_m2_hwid_detail.config(text=f"Hardware ID: {hwid} | Instância: {inst}")
+        self.lbl_m2_hwid_detail.config(text=f"HWID: {dev['hwid']}  |  {dev['friendly_name']}")
 
     def _on_m1_device_selected(self, event=None):
         idx = self.cb_m1_device.current()
@@ -694,12 +868,9 @@ class DualPointerApp:
         self.config["mouse2"]["sensitivity"] = v
         self.engine.update_config(self.config)
 
-    # --- PERSONALIZAÇÃO DE CURSORES ---
-
-    def _on_cursor_target_changed(self):
-        target = self.cursor_target_var.get()
-        self._load_cursor_form(target)
-
+    # -------------------------------------------------------------------------
+    # PERSONALIZAÇÃO DE CURSORES
+    # -------------------------------------------------------------------------
     def _load_cursor_form(self, target: str):
         c_cfg = self.config.get(target, {}).get("cursor", {})
         shape = c_cfg.get("shape", "sleek")
@@ -753,17 +924,16 @@ class DualPointerApp:
         self.engine.update_config(self.config)
 
     def _render_preview(self, mouse_x: float = 120.0, mouse_y: float = 100.0):
-        """Redesenha o cursor no canvas de pré-visualização."""
         self.preview_canvas.delete("all")
         target = self.cursor_target_var.get()
         c_cfg = self.config.get(target, {}).get("cursor", {})
         
-        # Desenha grade de fundo estilo display
+        # Desenha grade de fundo elegante
         w = self.preview_canvas.winfo_width() or 240
         h = self.preview_canvas.winfo_height() or 200
-        for x in range(0, w, 30):
+        for x in range(0, w, 28):
             self.preview_canvas.create_line(x, 0, x, h, fill="#131B2E", width=1)
-        for y in range(0, h, 30):
+        for y in range(0, h, 28):
             self.preview_canvas.create_line(0, y, w, y, fill="#131B2E", width=1)
             
         draw_cursor_on_canvas(self.preview_canvas, mouse_x, mouse_y, c_cfg, scale=1.2)
@@ -771,8 +941,9 @@ class DualPointerApp:
     def _on_canvas_motion(self, event):
         self._render_preview(event.x, event.y)
 
-    # --- INICIALIZAÇÃO E SISTEMA ---
-
+    # -------------------------------------------------------------------------
+    # CONTROLES DE SISTEMA & MOTOR
+    # -------------------------------------------------------------------------
     def _on_autostart_toggled(self):
         enabled = self.chk_autostart_var.get()
         success = set_startup_enabled(enabled)
@@ -785,49 +956,24 @@ class DualPointerApp:
             self.chk_autostart_var.set(not enabled)
             messagebox.showerror("Erro de Permissão", "Não foi possível modificar o atalho na pasta Inicializar.")
 
+    def _on_hide_cursor_toggled(self):
+        hide = self.chk_hide_cursor_var.get()
+        self.config["system"]["hide_os_cursor"] = hide
+        self.engine.update_config(self.config)
+
     def _on_sim_mode_toggled(self):
         sim = self.chk_sim_var.get()
         self.config["system"]["simulation_mode"] = sim
-        self.engine.simulation_mode = sim
-        self.engine.update_config(self.config)
-
-    def _on_hide_os_cursor_toggled(self):
-        hide = self.chk_hide_os_var.get()
-        self.config["system"]["hide_os_cursor"] = hide
         self.engine.update_config(self.config)
 
     def _on_toggle_engine_clicked(self):
         is_active = self.engine.toggle_pause()
         if is_active:
-            self.lbl_status_pill.config(text="● ATIVO", fg=ACCENT_GREEN, bg="#064E3B")
-            self.btn_toggle_engine.config(text="Pausar Motor", bg="#DC2626", activebackground="#B91C1C")
+            self.lbl_status_pill.config(text="● MOTOR ATIVO", fg=ACCENT_GREEN, bg="#064E3B")
+            self.btn_toggle_engine.config(text="Pausar Motor", bg="#DC2626")
         else:
             self.lbl_status_pill.config(text="❚❚ PAUSADO", fg=ACCENT_ORANGE, bg="#78350F")
-            self.btn_toggle_engine.config(text="Ativar Motor", bg="#16A34A", activebackground="#15803D")
-
-    def _on_device_activity(self, target: str):
-        """Atualiza indicadores visuais de atividade quando um mouse se move ou clica."""
-        if target == 'm1':
-            self.lbl_m1_active.config(text="● Lugar 1 Clicando / Movendo...", fg=ACCENT_GREEN)
-            self.root.after(300, lambda: self.lbl_m1_active.config(text="● Lugar 1 Operando Isoladamente", fg=ACCENT_GREEN))
-        else:
-            self.lbl_m2_active.config(text="● Lugar 2 Clicando / Movendo...", fg=ACCENT_ORANGE)
-            self.root.after(300, lambda: self.lbl_m2_active.config(text="● Lugar 2 Operando Isoladamente", fg=ACCENT_GREEN))
-
-    def _on_engine_positions_updated(self, x1, y1, x2, y2):
-        """Atualiza coordenadas em tempo real das Áreas de Trabalho na interface."""
-        if hasattr(self, 'lbl_m1_pos'):
-            self.lbl_m1_pos.config(text=f"📍 Coordenadas: X: {int(x1)}, Y: {int(y1)}")
-        if hasattr(self, 'lbl_m2_pos'):
-            self.lbl_m2_pos.config(text=f"📍 Coordenadas: X: {int(x2)}, Y: {int(y2)}")
-
-    def _on_workspace_focus_changed(self, seat: str, hwnd: int, title: str):
-        """Atualiza a janela em foco de cada Área de Trabalho na interface."""
-        clean_title = (title[:34] + '...') if len(title) > 36 else (title or "Área de Trabalho / Desktop")
-        if seat == "m1" and hasattr(self, 'lbl_m1_window'):
-            self.root.after(0, lambda: self.lbl_m1_window.config(text=f"🪟 Janela Ativa: {clean_title}"))
-        elif seat == "m2" and hasattr(self, 'lbl_m2_window'):
-            self.root.after(0, lambda: self.lbl_m2_window.config(text=f"🪟 Janela Ativa: {clean_title}"))
+            self.btn_toggle_engine.config(text="Ativar Motor", bg="#16A34A")
 
     def save_and_apply(self):
         save_config(self.config)

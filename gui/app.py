@@ -647,8 +647,9 @@ class DualPointerApp:
             font=("Segoe UI", 18, "bold"), fg=TEXT_PRIMARY, bg=BG_SURFACE
         ).pack()
         
+        app_ver = self.config.get("app", {}).get("version", "1.1")
         tk.Label(
-            about_card, text="Versão 1.1 Multi-Seat Pro • Windows 10/11 x64",
+            about_card, text=f"Versão {app_ver} Multi-Seat Pro • Windows 10/11 x64",
             font=("Segoe UI", 9), fg=TEXT_SECONDARY, bg=BG_SURFACE
         ).pack(pady=(1, 14))
         

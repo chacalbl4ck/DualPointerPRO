@@ -82,9 +82,9 @@ jobs:
           else:
               try:
                   with open('config.json', 'r', encoding='utf-8') as f:
-                      ver = json.load(f).get('app', {}).get('version', '1.0.0')
+                      ver = json.load(f).get('app', {}).get('version', '1.1')
               except Exception:
-                  ver = '1.0.0'
+                  ver = '1.1'
               tag = ver if ver.startswith('v') else f'v{ver}'
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write(f'tag={tag}\n')

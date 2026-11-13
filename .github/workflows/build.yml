@@ -1,0 +1,80 @@
+name: Build DualPointer Pro Executable
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows Executable (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Executable with PyInstaller
+        run: |
+          pyinstaller --noconfirm DualPointerPro.spec
+
+      - name: Verify Executable & Compute Checksum
+        shell: pwsh
+        run: |
+          $exePath = "dist\DualPointerPro.exe"
+          if (!(Test-Path $exePath)) {
+            Write-Error "Arquivo executável '$exePath' não foi encontrado após o build!"
+            exit 1
+          }
+          $item = Get-Item $exePath
+          $hash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash
+          Write-Host "=========================================="
+          Write-Host "Build Concluído com Sucesso!"
+          Write-Host "Arquivo: $($item.FullName)"
+          Write-Host "Tamanho: $([math]::Round($item.Length / 1MB, 2)) MB ($($item.Length) bytes)"
+          Write-Host "SHA256:  $hash"
+          Write-Host "=========================================="
+          "$hash  DualPointerPro.exe" | Out-File -FilePath "dist\checksums.txt" -Encoding ascii
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DualPointerPro-Windows-x64
+          path: |
+            dist/DualPointerPro.exe
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/DualPointerPro.exe
+            dist/checksums.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

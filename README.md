@@ -4,6 +4,7 @@
 [![Plataforma](https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011%20x64-0078D6?style=for-the-badge&logo=windows)](https://github.com/chacalbl4ck)
 [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-10B981?style=for-the-badge)](https://github.com/chacalbl4ck)
 [![GitHub Actions](https://img.shields.io/badge/CI%2FCD-Automated%20Build%20%26%20Release-6366F1?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/chacalbl4ck)
+[![Build & Release DualPointer Pro](https://github.com/chacalbl4ck/DualPointerPRO/actions/workflows/build.yml/badge.svg)](https://github.com/chacalbl4ck/DualPointerPRO/actions/workflows/build.yml)
 
 > **Gerenciador Avançado de Múltiplos Mouses e Múltiplos Monitores Independentes para Windows**  
 > Desenvolvido por **Caio Monteiro** ([@chacalbl4ck](https://github.com/chacalbl4ck))
